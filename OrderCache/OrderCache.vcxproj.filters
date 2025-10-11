@@ -21,12 +21,24 @@
     <ClCompile Include="OrderCache.cpp">
       <Filter>Arquivos de Origem</Filter>
     </ClCompile>
+    <ClCompile Include="OrderCacheStressTest.cpp">
+      <Filter>Arquivos de Origem</Filter>
+    </ClCompile>
+    <ClCompile Include="OrderCacheTestRunner.cpp">
+      <Filter>Arquivos de Origem</Filter>
+    </ClCompile>
+    <ClCompile Include="OrderCacheBenchmark.cpp">
+      <Filter>Arquivos de Origem</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="OrderCacheInterface.h">
       <Filter>Arquivos de Origem</Filter>
     </ClInclude>
     <ClInclude Include="OrderCache.h">
+      <Filter>Arquivos de Origem</Filter>
+    </ClInclude>
+    <ClInclude Include="OrderCacheTestUtils.h">
       <Filter>Arquivos de Origem</Filter>
     </ClInclude>
   </ItemGroup>

@@ -1,6 +1,10 @@
 #include "OrderCache.h"
 #include <algorithm>
 #include <unordered_map>
+#include <stdexcept>
+#include <iostream>
+#include <sstream>
+using namespace std;
 
 void OrderCache::addOrder(Order order) {
     const std::string& orderId = order.orderId();
@@ -17,7 +21,11 @@ void OrderCache::addOrder(Order order) {
 
 void OrderCache::cancelOrder(const std::string& orderId) {
     auto it = orders_.find(orderId);
-    if (it == orders_.end()) return;
+    if (it == orders_.end()) {
+		stringstream ss;
+		ss << "Order ID not found: " << orderId;
+        throw std::out_of_range(ss.str().c_str());
+    }
 
     const Order& order = it->second;
 

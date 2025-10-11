@@ -1,3 +1,4 @@
+#include "OrderCacheTestUtils.h"
 #include "OrderCache.h"
 #include <cassert>
 #include <iostream>
@@ -21,7 +22,7 @@ void runExample1Tests() {
     cache.addOrder(Order("OrdId10", "SecId2", "Sell", 1000, "User5", "Company1"));
     cache.addOrder(Order("OrdId11", "SecId1", "Sell", 1100, "User13", "Company2"));
     cache.addOrder(Order("OrdId12", "SecId2", "Buy", 1200, "User9", "Company2"));
-    cache.addOrder(Order("OrdId13", "SecId1", "Sell", 1300, "User1", "Company")); // Note: Assuming "Company" is a valid company name
+    cache.addOrder(Order("OrdId13", "SecId1", "Sell", 1300, "User1", "Company"));
 
     // Test getMatchingSizeForSecurity
     assert(cache.getMatchingSizeForSecurity("SecId1") == 300 && "SecId1 matching size should be 300");
@@ -55,12 +56,58 @@ void runExample1Tests() {
     // Test cancelOrdersForSecIdWithMinimumQty
     cache.cancelOrdersForSecIdWithMinimumQty("SecId2", 900);
     orders = cache.getAllOrders();
-    assert(orders.size() == 8 && "Total orders after canceling SecId2 with minQty 900 should be 9");
+    assert(orders.size() == 8 && "Total orders after canceling SecId2 with minQty 900 should be 8");
     bool largeSecId2Found = false;
+    std::vector<std::string> remainingOrderIds;
     for (const auto& order : orders) {
-        if (order.securityId() == "SecId2" && order.qty() >= 900) largeSecId2Found = true;
+        if (order.securityId() == "SecId2") {
+            if (order.qty() >= 900) largeSecId2Found = true;
+            remainingOrderIds.push_back(order.orderId());
+        }
     }
     assert(!largeSecId2Found && "No SecId2 orders with qty >= 900 should remain");
+    assert(std::find(remainingOrderIds.begin(), remainingOrderIds.end(), "OrdId4") != remainingOrderIds.end() &&
+        "OrdId4 should remain (qty=400 < 900)");
+    assert(std::find(remainingOrderIds.begin(), remainingOrderIds.end(), "OrdId9") == remainingOrderIds.end() &&
+        "OrdId9 should be canceled (qty=900)");
+    assert(std::find(remainingOrderIds.begin(), remainingOrderIds.end(), "OrdId10") == remainingOrderIds.end() &&
+        "OrdId10 should be canceled (qty=1000)");
+    assert(std::find(remainingOrderIds.begin(), remainingOrderIds.end(), "OrdId12") == remainingOrderIds.end() &&
+        "OrdId12 should be canceled (qty=1200)");
+
+    // Test cancelOrdersForSecIdWithMinimumQty with 3 matching orders
+    OrderCache minQtyCache;
+    minQtyCache.addOrder(Order("Ord1", "SecA", "Buy", 1000, "User1", "Company1"));
+    minQtyCache.addOrder(Order("Ord2", "SecA", "Sell", 1500, "User2", "Company2"));
+    minQtyCache.addOrder(Order("Ord3", "SecA", "Buy", 2000, "User3", "Company3"));
+    minQtyCache.addOrder(Order("Ord4", "SecA", "Sell", 500, "User4", "Company4")); // Below minQty
+    minQtyCache.addOrder(Order("Ord5", "SecB", "Buy", 1000, "User5", "Company5")); // Different security
+    minQtyCache.cancelOrdersForSecIdWithMinimumQty("SecA", 1000);
+    orders = minQtyCache.getAllOrders();
+    assert(orders.size() == 2 && "Total orders after canceling SecA with minQty 1000 should be 2");
+    remainingOrderIds.clear();
+    for (const auto& order : orders) {
+        remainingOrderIds.push_back(order.orderId());
+    }
+    assert(std::find(remainingOrderIds.begin(), remainingOrderIds.end(), "Ord4") != remainingOrderIds.end() &&
+        "Ord4 should remain (qty < 1000)");
+    assert(std::find(remainingOrderIds.begin(), remainingOrderIds.end(), "Ord5") != remainingOrderIds.end() &&
+        "Ord5 should remain (different security)");
+    assert(std::find(remainingOrderIds.begin(), remainingOrderIds.end(), "Ord1") == remainingOrderIds.end() &&
+        "Ord1 should be canceled (qty >= 1000)");
+    assert(std::find(remainingOrderIds.begin(), remainingOrderIds.end(), "Ord2") == remainingOrderIds.end() &&
+        "Ord2 should be canceled (qty >= 1000)");
+    assert(std::find(remainingOrderIds.begin(), remainingOrderIds.end(), "Ord3") == remainingOrderIds.end() &&
+        "Ord3 should be canceled (qty >= 1000)");
+    std::cout << "cancelOrdersForSecIdWithMinimumQty with 3 matching orders test passed!\n";
+
+    // Test bug fix for getMatchingSizeForSecurity
+    OrderCache bugCache;
+    bugCache.addOrder(Order("B1", "TEST", "Buy", 200, "User1", "C1"));
+    bugCache.addOrder(Order("B2", "TEST", "Buy", 200, "User2", "C2"));
+    bugCache.addOrder(Order("S1", "TEST", "Sell", 100, "User3", "Csell"));
+    assert(bugCache.getMatchingSizeForSecurity("TEST") == 100 && "Bug fix: max match 100");
+    std::cout << "Bug fix test for getMatchingSizeForSecurity passed!\n";
 
     std::cout << "Example 1 Tests Passed!\n";
 }
@@ -122,11 +169,4 @@ void runExample2Tests() {
     assert(!largeSecId1Found && "No SecId1 orders with qty >= 800 should remain");
 
     std::cout << "Example 2 Tests Passed!\n";
-}
-
-int main() {
-    runExample1Tests();
-    runExample2Tests();
-    std::cout << "All Tests Completed Successfully!\n";
-    return 0;
 }

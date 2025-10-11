@@ -125,11 +125,15 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="OrderCache.cpp" />
+    <ClCompile Include="OrderCacheBenchmark.cpp" />
+    <ClCompile Include="OrderCacheStressTest.cpp" />
     <ClCompile Include="OrderCacheTest.cpp" />
+    <ClCompile Include="OrderCacheTestRunner.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="OrderCache.h" />
     <ClInclude Include="OrderCacheInterface.h" />
+    <ClInclude Include="OrderCacheTestUtils.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
