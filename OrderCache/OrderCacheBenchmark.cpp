@@ -16,10 +16,10 @@ void runBenchmark(unsigned int numOrders) {
     // Seed random number generator
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_int_distribution<> secDist(10, 100); // 10 securities
+    std::uniform_int_distribution<> secDist(100, 1000); // 10 securities
     std::uniform_int_distribution<> qtyDist(1000, 2000);
-    std::uniform_int_distribution<> userDist(100, 200); // 20 users
-    std::uniform_int_distribution<> companyDist(25, 50); // 5 companies
+    std::uniform_int_distribution<> userDist(1000, 2000); // 20 users
+    std::uniform_int_distribution<> companyDist(250, 500); // 5 companies
     std::uniform_int_distribution<> sideDist(0, 1); // 0: Buy, 1: Sell
 
     for (int size : testSizes) {

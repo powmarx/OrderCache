@@ -8,15 +8,20 @@ using namespace std;
 
 void OrderCache::addOrder(Order order) {
     const std::string& orderId = order.orderId();
+    const std::string& securityId = order.securityId();
+    const std::string& user = order.user();// Add to main storage
+    orders_.emplace(orderId, order); // O(1) average case
 
-    // Use emplace to construct Order in-place, avoiding default constructor
-    orders_.emplace(orderId, order);
+    // Update indexes with collision mitigation
+    auto& secSet = ordersBySecurity_[securityId];
+    if (secSet.empty()) secSet.reserve(10000); // Preallocate for ~10,000 orders
+    secSet.max_load_factor(0.7F); // Reduce collisions
+    secSet.insert(orderId); // O(1) average case
 
-    // Add to security index
-    ordersBySecurity_[order.securityId()].insert(orderId);
-
-    // Add to user index
-    ordersByUser_[order.user()].insert(orderId);
+    auto& userSet = ordersByUser_[user];
+    if (userSet.empty()) userSet.reserve(5000); // Preallocate for ~5,000 orders
+    userSet.max_load_factor(0.7F); // Reduce collisions
+    userSet.insert(orderId); // O(1) average case
 }
 
 void OrderCache::cancelOrder(const std::string& orderId) {
@@ -135,8 +140,8 @@ unsigned int OrderCache::getMatchingSizeForSecurity(const std::string& securityI
 
     const auto& orderIds = secIt->second;
 
-    std::unordered_map<std::string, unsigned long long> buyQtyPerCompany;
-    std::unordered_map<std::string, unsigned long long> sellQtyPerCompany;
+    std::unordered_map<std::string, unsigned int> buyQtyPerCompany;
+    std::unordered_map<std::string, unsigned int> sellQtyPerCompany;
 
     // Aggregate buy and sell quantities by company
     for (const std::string& oid : orderIds) {
@@ -144,32 +149,32 @@ unsigned int OrderCache::getMatchingSizeForSecurity(const std::string& securityI
         if (oit != orders_.end()) {
             const Order& o = oit->second;
             if (o.side() == "Buy") {
-                buyQtyPerCompany[o.company()] += static_cast<unsigned long long>(o.qty());
+                buyQtyPerCompany[o.company()] += static_cast<unsigned int>(o.qty());
             }
             else if (o.side() == "Sell") {
-                sellQtyPerCompany[o.company()] += static_cast<unsigned long long>(o.qty());
+                sellQtyPerCompany[o.company()] += static_cast<unsigned int>(o.qty());
             }
         }
     }
 
     // Calculate total sell quantity
-    unsigned long long totalSell = 0;
+    unsigned int totalSell = 0;
     for (const auto& p : sellQtyPerCompany) {
         totalSell += p.second;
     }
 
     // For each buying company, match against external sells
-    unsigned long long potentialMatch = 0;
+    unsigned int potentialMatch = 0;
     for (const auto& p : buyQtyPerCompany) {
         const std::string& comp = p.first;
-        unsigned long long buyQ = p.second;
-        unsigned long long selfSell = sellQtyPerCompany.count(comp) ? sellQtyPerCompany.at(comp) : 0ULL;
-        unsigned long long externalSell = (totalSell > selfSell) ? (totalSell - selfSell) : 0ULL;
+        unsigned int buyQ = p.second;
+        unsigned int selfSell = sellQtyPerCompany.count(comp) ? sellQtyPerCompany.at(comp) : 0ULL;
+        unsigned int externalSell = (totalSell > selfSell) ? (totalSell - selfSell) : 0ULL;
         potentialMatch += std::min(buyQ, externalSell);
     }
 
     // Cap by total sell to handle shared sell quantities
-    unsigned long long result = std::min(potentialMatch, totalSell);
+    unsigned int result = std::min(potentialMatch, totalSell);
     return static_cast<unsigned int>(result);
 }
 
