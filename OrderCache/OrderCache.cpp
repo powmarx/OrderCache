@@ -13,102 +13,117 @@ void OrderCache::addOrder(Order order) {
     orders_.emplace(orderId, order);
 
     // Add to security index
-    ordersBySecurity_[order.securityId()].push_back(orderId);
+    ordersBySecurity_[order.securityId()].insert(orderId);
 
     // Add to user index
-    ordersByUser_[order.user()].push_back(orderId);
+    ordersByUser_[order.user()].insert(orderId);
 }
 
 void OrderCache::cancelOrder(const std::string& orderId) {
-    auto it = orders_.find(orderId);
-    if (it == orders_.end()) {
-		stringstream ss;
-		ss << "Order ID not found: " << orderId;
-        throw std::out_of_range(ss.str().c_str());
+    // Single lookup in main storage
+    auto orderIt = orders_.find(orderId);
+    if (orderIt == orders_.end()) {
+        // Use pre-allocated exception or simpler construction
+        throw std::out_of_range("Order ID not found: " + orderId);
     }
 
-    const Order& order = it->second;
+    const Order& order = orderIt->second;
+    const std::string& securityId = order.securityId();
+    const std::string& user = order.user();
 
-    // Remove from security index
-    auto& secOrders = ordersBySecurity_[order.securityId()];
-    secOrders.erase(std::remove(secOrders.begin(), secOrders.end(), orderId), secOrders.end());
-    if (secOrders.empty()) {
-        ordersBySecurity_.erase(order.securityId());
-    }
-
-    // Remove from user index
-    auto& userOrders = ordersByUser_[order.user()];
-    userOrders.erase(std::remove(userOrders.begin(), userOrders.end(), orderId), userOrders.end());
-    if (userOrders.empty()) {
-        ordersByUser_.erase(order.user());
-    }
-
-    // Remove from main storage
-    orders_.erase(orderId);
-}
-
-void OrderCache::cancelOrdersForUser(const std::string& user) {
-    auto it = ordersByUser_.find(user);
-    if (it == ordersByUser_.end()) return;
-
-    // For each order ID of this user
-    for (const auto& orderId : it->second) {
-        auto orderIt = orders_.find(orderId);
-        if (orderIt != orders_.end()) {
-            // Remove from security index
-            auto& secOrders = ordersBySecurity_[orderIt->second.securityId()];
-            secOrders.erase(std::remove(secOrders.begin(), secOrders.end(), orderId), secOrders.end());
-            if (secOrders.empty()) {
-                ordersBySecurity_.erase(orderIt->second.securityId());
-            }
-
-            // Remove from main storage
-            orders_.erase(orderId);
+    // Optimize security index removal O(1)
+    auto secIt = ordersBySecurity_.find(securityId);
+    if (secIt != ordersBySecurity_.end()) {
+        auto& secOrders = secIt->second;
+        // Use unordered_set for O(1) removal
+        secOrders.erase(orderId);
+		// For efficiency, only erase the map entry if the set is empty
+        if (secOrders.empty()) {
+            ordersBySecurity_.erase(secIt);
         }
     }
 
-    // Clear user index
-    ordersByUser_.erase(user);
+    // Optimize user index removal
+    auto userIt = ordersByUser_.find(user);
+    if (userIt != ordersByUser_.end()) {
+        auto& userOrders = userIt->second;
+        userOrders.erase(orderId);
+        if (userOrders.empty()) {
+            ordersByUser_.erase(userIt);
+        }
+    }
+
+    // Remove from main storage last (for exception safety)
+    orders_.erase(orderIt);
+}
+void OrderCache::cancelOrdersForUser(const std::string& user) {
+    auto userIt = ordersByUser_.find(user);
+    if (userIt == ordersByUser_.end()) return;
+
+    // Get copy of order IDs to avoid modifying while iterating
+    auto orderIds = userIt->second; // copy of the set
+
+    // Remove each order using the existing cancelOrder logic
+    for (const auto& orderId : orderIds) {
+        // Reuse the same pattern as cancelOrder
+        auto orderIt = orders_.find(orderId);
+        if (orderIt != orders_.end()) {
+            const Order& order = orderIt->second;
+            const std::string& securityId = order.securityId();
+
+            // Remove from security index
+            auto secIt = ordersBySecurity_.find(securityId);
+            if (secIt != ordersBySecurity_.end()) {
+                auto& secOrders = secIt->second;
+                secOrders.erase(orderId);
+                if (secOrders.empty()) {
+                    ordersBySecurity_.erase(secIt);
+                }
+            }
+
+            // Remove from main storage
+            orders_.erase(orderIt);
+        }
+    }
+
+    // Remove the user index entry
+    ordersByUser_.erase(userIt);
 }
 
 void OrderCache::cancelOrdersForSecIdWithMinimumQty(const std::string& securityId, unsigned int minQty) {
-    auto it = ordersBySecurity_.find(securityId);
-    if (it == ordersBySecurity_.end()) return;
+    auto secIt = ordersBySecurity_.find(securityId);
+    if (secIt == ordersBySecurity_.end()) return;
 
-    // Collect orders to remove
-    std::vector<std::string> toRemove;
-    for (const auto& orderId : it->second) {
+    // Get copy to avoid modifying while iterating
+    auto orderIds = secIt->second; // copy of the set
+
+    for (const auto& orderId : orderIds) {
         auto orderIt = orders_.find(orderId);
         if (orderIt != orders_.end() && orderIt->second.qty() >= minQty) {
-            toRemove.push_back(orderId);
-        }
-    }   
+            const Order& order = orderIt->second;
+            const std::string& user = order.user();
 
-    // Remove collected orders
-    for (const auto& orderId : toRemove) {
-        auto orderIt = orders_.find(orderId);
-        if (orderIt != orders_.end()) {
             // Remove from user index
-            auto& userOrders = ordersByUser_[orderIt->second.user()];
-            userOrders.erase(std::remove(userOrders.begin(), userOrders.end(), orderId), userOrders.end());
-            if (userOrders.empty()) {
-                ordersByUser_.erase(orderIt->second.user());
+            auto userIt = ordersByUser_.find(user);
+            if (userIt != ordersByUser_.end()) {
+                auto& userOrders = userIt->second;
+                userOrders.erase(orderId);
+                if (userOrders.empty()) {
+                    ordersByUser_.erase(userIt);
+                }
             }
 
             // Remove from main storage
-            orders_.erase(orderId);
+            orders_.erase(orderIt);
+
+            // Remove from the security index (current set we're iterating on copy)
+            secIt->second.erase(orderId);
         }
     }
 
-    // Update security index
-    it->second.erase(std::remove_if(it->second.begin(), it->second.end(),
-        [&](const std::string& id) {
-            return std::find(toRemove.begin(), toRemove.end(), id) != toRemove.end();
-        }),
-        it->second.end());
-
-    if (it->second.empty()) {
-        ordersBySecurity_.erase(securityId);
+    // Clean up empty security entry
+    if (secIt->second.empty()) {
+        ordersBySecurity_.erase(secIt);
     }
 }
 

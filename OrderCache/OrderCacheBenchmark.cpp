@@ -16,10 +16,10 @@ void runBenchmark(unsigned int numOrders) {
     // Seed random number generator
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_int_distribution<> secDist(1, 10); // 10 securities
-    std::uniform_int_distribution<> qtyDist(100, 2000);
-    std::uniform_int_distribution<> userDist(1, 20); // 20 users
-    std::uniform_int_distribution<> companyDist(1, 5); // 5 companies
+    std::uniform_int_distribution<> secDist(10, 100); // 10 securities
+    std::uniform_int_distribution<> qtyDist(1000, 2000);
+    std::uniform_int_distribution<> userDist(100, 200); // 20 users
+    std::uniform_int_distribution<> companyDist(25, 50); // 5 companies
     std::uniform_int_distribution<> sideDist(0, 1); // 0: Buy, 1: Sell
 
     for (int size : testSizes) {
@@ -114,6 +114,7 @@ void runBenchmark(unsigned int numOrders) {
         // Verify order count
         auto remainingOrders = cache.getAllOrders();
         std::cout << "Orders remaining after operations: " << remainingOrders.size() << "\n";
+		std::cout << "All time tests: " << (cancelMinQtyDuration.count() + cancelUserDuration.count() + cancelOrderDuration.count() + matchSizeDuration.count() + getAllOrdersDuration.count() + addOrderDuration.count()) << " us\n";
         std::cout << "Benchmark for " << size << " orders completed.\n";
     }
 

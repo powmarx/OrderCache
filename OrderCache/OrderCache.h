@@ -4,18 +4,16 @@
 #include <unordered_map>
 #include <vector>
 #include <string>
+#include <unordered_set>
 
 class OrderCache : public OrderCacheInterface {
 private:
     // Main storage: map order ID to Order object for quick lookup
     std::unordered_map<std::string, Order> orders_;
 
-    // Index by security ID to vectors of order IDs for matching
-    std::unordered_map<std::string, std::vector<std::string>> ordersBySecurity_;
-
-    // Index by user for quick cancellation
-    std::unordered_map<std::string, std::vector<std::string>> ordersByUser_;
-
+	// Indexes for efficient queries
+    std::unordered_map<std::string, std::unordered_set<std::string>> ordersBySecurity_;
+    std::unordered_map<std::string, std::unordered_set<std::string>> ordersByUser_;
 public:
     void addOrder(Order order) override;
     void cancelOrder(const std::string& orderId) override;
