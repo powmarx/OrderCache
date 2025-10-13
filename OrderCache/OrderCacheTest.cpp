@@ -295,6 +295,7 @@ void runOverMatchTest() {
     // Add orders for over-matching case
     std::vector<Order> orders = {
         Order("OrdId1", "SecId1", "Buy", 1000, "User1", "CompanyA"),
+        Order("OrdId1", "SecId1", "Sell", 1000, "User1", "CompanyA"),
         Order("OrdId2", "SecId1", "Buy", 1000, "User2", "CompanyB"),
         Order("OrdId3", "SecId1", "Buy", 1000, "User3", "CompanyC"),
         Order("OrdId4", "SecId1", "Sell", 500, "User4", "CompanyD")
@@ -302,7 +303,12 @@ void runOverMatchTest() {
 
     // Add orders to cache
     for (const auto& order : orders) {
-        cache.addOrder(order);
+        try {
+            cache.addOrder(order);
+        }
+        catch (const std::exception& ex) {
+            std::cerr << "Error adding order ->  " << ex.what() << "\n";
+        }
     }
 
     // Verify order count

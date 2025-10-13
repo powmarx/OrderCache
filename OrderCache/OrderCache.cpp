@@ -10,7 +10,9 @@ void OrderCache::addOrder(Order order) {
     const string& securityId = order.securityId();
     const string& user = order.user();// Add to main storage
     
-    orders_.emplace(orderId, order); // O(1) average case
+    if (!(orders_.try_emplace(orderId, order)).second) {
+		throw invalid_argument("Duplicate Order ID: " + orderId);
+    }; // O(1) average case
 
     // Update indexes with collision mitigation
     auto& secSet = ordersBySecurity_[securityId];
