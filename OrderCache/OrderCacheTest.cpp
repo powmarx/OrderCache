@@ -6,7 +6,7 @@
 #include <vector>
 
 void runExample1Tests() {
-    std::cout << "Running Example 1 Tests...\n";
+    cout << "Running Example 1 Tests...\n";
     OrderCache cache;
 
     // Add orders from Example 1
@@ -58,7 +58,7 @@ void runExample1Tests() {
     orders = cache.getAllOrders();
     assert(orders.size() == 8 && "Total orders after canceling SecId2 with minQty 900 should be 8");
     bool largeSecId2Found = false;
-    std::vector<std::string> remainingOrderIds;
+    vector<string> remainingOrderIds;
     for (const auto& order : orders) {
         if (order.securityId() == "SecId2") {
             if (order.qty() >= 900) largeSecId2Found = true;
@@ -66,13 +66,13 @@ void runExample1Tests() {
         }
     }
     assert(!largeSecId2Found && "No SecId2 orders with qty >= 900 should remain");
-    assert(std::find(remainingOrderIds.begin(), remainingOrderIds.end(), "OrdId4") != remainingOrderIds.end() &&
+    assert(find(remainingOrderIds.begin(), remainingOrderIds.end(), "OrdId4") != remainingOrderIds.end() &&
         "OrdId4 should remain (qty=400 < 900)");
-    assert(std::find(remainingOrderIds.begin(), remainingOrderIds.end(), "OrdId9") == remainingOrderIds.end() &&
+    assert(find(remainingOrderIds.begin(), remainingOrderIds.end(), "OrdId9") == remainingOrderIds.end() &&
         "OrdId9 should be canceled (qty=900)");
-    assert(std::find(remainingOrderIds.begin(), remainingOrderIds.end(), "OrdId10") == remainingOrderIds.end() &&
+    assert(find(remainingOrderIds.begin(), remainingOrderIds.end(), "OrdId10") == remainingOrderIds.end() &&
         "OrdId10 should be canceled (qty=1000)");
-    assert(std::find(remainingOrderIds.begin(), remainingOrderIds.end(), "OrdId12") == remainingOrderIds.end() &&
+    assert(find(remainingOrderIds.begin(), remainingOrderIds.end(), "OrdId12") == remainingOrderIds.end() &&
         "OrdId12 should be canceled (qty=1200)");
 
     // Test cancelOrdersForSecIdWithMinimumQty with 3 matching orders
@@ -89,17 +89,17 @@ void runExample1Tests() {
     for (const auto& order : orders) {
         remainingOrderIds.push_back(order.orderId());
     }
-    assert(std::find(remainingOrderIds.begin(), remainingOrderIds.end(), "Ord4") != remainingOrderIds.end() &&
+    assert(find(remainingOrderIds.begin(), remainingOrderIds.end(), "Ord4") != remainingOrderIds.end() &&
         "Ord4 should remain (qty < 1000)");
-    assert(std::find(remainingOrderIds.begin(), remainingOrderIds.end(), "Ord5") != remainingOrderIds.end() &&
+    assert(find(remainingOrderIds.begin(), remainingOrderIds.end(), "Ord5") != remainingOrderIds.end() &&
         "Ord5 should remain (different security)");
-    assert(std::find(remainingOrderIds.begin(), remainingOrderIds.end(), "Ord1") == remainingOrderIds.end() &&
+    assert(find(remainingOrderIds.begin(), remainingOrderIds.end(), "Ord1") == remainingOrderIds.end() &&
         "Ord1 should be canceled (qty >= 1000)");
-    assert(std::find(remainingOrderIds.begin(), remainingOrderIds.end(), "Ord2") == remainingOrderIds.end() &&
+    assert(find(remainingOrderIds.begin(), remainingOrderIds.end(), "Ord2") == remainingOrderIds.end() &&
         "Ord2 should be canceled (qty >= 1000)");
-    assert(std::find(remainingOrderIds.begin(), remainingOrderIds.end(), "Ord3") == remainingOrderIds.end() &&
+    assert(find(remainingOrderIds.begin(), remainingOrderIds.end(), "Ord3") == remainingOrderIds.end() &&
         "Ord3 should be canceled (qty >= 1000)");
-    std::cout << "cancelOrdersForSecIdWithMinimumQty with 3 matching orders test passed!\n";
+    cout << "cancelOrdersForSecIdWithMinimumQty with 3 matching orders test passed!\n";
 
     // Test bug fix for getMatchingSizeForSecurity
     OrderCache bugCache;
@@ -107,13 +107,13 @@ void runExample1Tests() {
     bugCache.addOrder(Order("B2", "TEST", "Buy", 200, "User2", "C2"));
     bugCache.addOrder(Order("S1", "TEST", "Sell", 100, "User3", "Csell"));
     assert(bugCache.getMatchingSizeForSecurity("TEST") == 100 && "Bug fix: max match 100");
-    std::cout << "Bug fix test for getMatchingSizeForSecurity passed!\n";
+    cout << "Bug fix test for getMatchingSizeForSecurity passed!\n";
 
-    std::cout << "Example 1 Tests Passed!\n";
+    cout << "Example 1 Tests Passed!\n";
 }
 
 void runExample2Tests() {
-    std::cout << "Running Example 2 Tests...\n";
+    cout << "Running Example 2 Tests...\n";
     OrderCache cache;
 
     // Add orders from Example 2
@@ -168,16 +168,16 @@ void runExample2Tests() {
     }
     assert(!largeSecId1Found && "No SecId1 orders with qty >= 800 should remain");
 
-    std::cout << "Example 2 Tests Passed!\n";
+    cout << "Example 2 Tests Passed!\n";
 }
 
 void runExample3Tests() {
-    std::cout << "\nRunning Example Test 3...\n";
+    cout << "\nRunning Example Test 3...\n";
 
     OrderCache cache;
 
     // Add orders from the example
-    std::vector<Order> orders = {
+    vector<Order> orders = {
         Order("OrdId1", "SecId1", "Buy", 1000, "User1", "CompanyA"),
         Order("OrdId2", "SecId2", "Sell", 3000, "User2", "CompanyB"),
         Order("OrdId3", "SecId1", "Sell", 500, "User3", "CompanyA"),
@@ -199,16 +199,16 @@ void runExample3Tests() {
 
     // Single-threaded test: Calculate total matching quantity
     unsigned int totalMatchingQty = 0;
-    std::vector<std::string> securities = { "SecId1", "SecId2", "SecId3" };
+    vector<string> securities = { "SecId1", "SecId2", "SecId3" };
     for (const auto& secId : securities) {
         unsigned int qty = cache.getMatchingSizeForSecurity(secId);
-        std::cout << "Matching size for " << secId << ": " << qty << "\n";
+        cout << "Matching size for " << secId << ": " << qty << "\n";
         totalMatchingQty += qty;
     }
 
-    std::cout << "Total matching quantity (single-threaded): " << totalMatchingQty << "\n";
+    cout << "Total matching quantity (single-threaded): " << totalMatchingQty << "\n";
     assert(totalMatchingQty == 2700 && "Expected total matching quantity of 2700");
 
 
-    std::cout << "Example Test 3 Passed!\n";
+    cout << "Example Test 3 Passed!\n";
 }
