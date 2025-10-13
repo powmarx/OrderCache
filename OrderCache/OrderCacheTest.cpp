@@ -212,3 +212,114 @@ void runExample3Tests() {
 
     cout << "Example Test 3 Passed!\n";
 }
+
+void runExample4Tests() {
+    cout << "\nRunning Example Test 4...\n";
+
+    OrderCache cache;
+
+    // Add orders from the example
+    vector<Order> orders = {
+        Order("OrdId1", "SecId1", "Buy", 1000, "User1", "CompanyA"),
+        Order("OrdId2", "SecId2", "Sell", 3000, "User2", "CompanyA"),
+        Order("OrdId3", "SecId1", "Sell", 500, "User3", "CompanyA"),
+        Order("OrdId4", "SecId2", "Buy", 600, "User4", "CompanyA"),
+        Order("OrdId5", "SecId2", "Buy", 100, "User5", "CompanyA"),
+        Order("OrdId6", "SecId3", "Buy", 1000, "User6", "CompanyA"),
+        Order("OrdId7", "SecId2", "Buy", 2000, "User7", "CompanyA"),
+        Order("OrdId8", "SecId2", "Sell", 5000, "User8", "CompanyA")
+    };
+
+    // Add orders to cache
+    for (const auto& order : orders) {
+        cache.addOrder(order);
+    }
+
+    // Verify order count
+    auto allOrders = cache.getAllOrders();
+    assert(allOrders.size() == 8 && "Expected 8 orders in cache");
+
+    // Single-threaded test: Calculate total matching quantity
+    unsigned int totalMatchingQty = 0;
+    vector<string> securities = { "SecId1", "SecId2", "SecId3" };
+    for (const auto& secId : securities) {
+        unsigned int qty = cache.getMatchingSizeForSecurity(secId);
+        cout << "Matching size for " << secId << ": " << qty << "\n";
+        totalMatchingQty += qty;
+    }    
+	assert(totalMatchingQty == 0 && "Expected total matching quantity of 0");
+
+	//cancel all orders for CompanyA
+	vector<string> users = { "User1", "User2", "User3", "User4", "User5", "User6", "User7", "User8" };
+    for (const auto& user : users) {
+        cache.cancelOrdersForUser(user);
+	}
+	assert(cache.getAllOrders().empty() && "Expected all orders to be canceled");
+
+
+    // Add orders from the example
+	orders.clear();
+    orders = {
+        Order("OrdId1", "SecId1", "Buy", 1000, "User1", "CompanyA"),
+        Order("OrdId2", "SecId2", "Sell", 3000, "User2", "CompanyB"),
+        Order("OrdId3", "SecId1", "Sell", 500, "User3", "CompanyC"),
+        Order("OrdId4", "SecId2", "Buy", 600, "User4", "CompanyD"),
+        Order("OrdId5", "SecId2", "Buy", 100, "User5", "CompanyE"),
+        Order("OrdId6", "SecId3", "Buy", 1000, "User6", "CompanyF"),
+        Order("OrdId7", "SecId2", "Buy", 2000, "User7", "CompanyG"),
+        Order("OrdId8", "SecId2", "Sell", 5000, "User8", "CompanyH")
+    };
+
+    // Add orders to cache
+    for (const auto& order : orders) {
+        cache.addOrder(order);
+    }
+    
+    totalMatchingQty = 0;
+    for (const auto& secId : securities) {
+        unsigned int qty = cache.getMatchingSizeForSecurity(secId);
+        cout << "Matching size for " << secId << ": " << qty << "\n";
+        totalMatchingQty += qty;
+    }
+	assert(totalMatchingQty == 500+2700+0 && "Expected total matching quantity of 0");
+
+    cout << "Total matching quantity (single-threaded): " << totalMatchingQty << "\n";
+    cout << "Example Test 4 Passed!\n";
+}
+
+void runOverMatchTest() {
+    std::cout << "\nRunning Over-Match Test...\n";
+
+    OrderCache cache;
+
+    // Add orders for over-matching case
+    std::vector<Order> orders = {
+        Order("OrdId1", "SecId1", "Buy", 1000, "User1", "CompanyA"),
+        Order("OrdId2", "SecId1", "Buy", 1000, "User2", "CompanyB"),
+        Order("OrdId3", "SecId1", "Buy", 1000, "User3", "CompanyC"),
+        Order("OrdId4", "SecId1", "Sell", 500, "User4", "CompanyD")
+    };
+
+    // Add orders to cache
+    for (const auto& order : orders) {
+        cache.addOrder(order);
+    }
+
+    // Verify order count
+    auto allOrders = cache.getAllOrders();
+    assert(allOrders.size() == 4 && "Expected 4 orders in cache");
+
+    // Single-threaded test: Calculate matching quantity
+    unsigned int matchingQty = cache.getMatchingSizeForSecurity("SecId1");
+    std::cout << "Matching size for SecId1: " << matchingQty << "\n";
+    assert(matchingQty == 500 && "Expected matching quantity of 500 for SecId1");
+
+	// Test cancelOrdersForSecIdWithMinimumQty in over-match scenario
+    cache.cancelOrdersForSecIdWithMinimumQty("SecId1", 1000);
+	assert(cache.getAllOrders().size() == 1 && "Expected 1 order remaining after canceling SecId1 with minQty 1000");
+	cout << "Orders remaining after canceling SecId1 with minQty 1000: " << cache.getAllOrders().size() << "\n";
+	assert(cache.getMatchingSizeForSecurity("SecId1") == 0 && "Expected matching quantity of 0 after cancellations");
+	cout << "Matching size for SecId1 after cancellations: " << cache.getMatchingSizeForSecurity("SecId1") << "\n";
+
+    std::cout << "Over-Match Test Passed!\n";
+}

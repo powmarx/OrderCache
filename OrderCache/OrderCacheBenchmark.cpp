@@ -12,14 +12,13 @@
 void runBenchmark(unsigned int numOrders) {
     cout << "\nRunning Performance Benchmarks...\n";
     vector<unsigned int> testSizes = (numOrders == 0) ? vector<unsigned>{100, 1000, 10000} : vector<unsigned int>{ numOrders };
-
     // Seed random number generator
     random_device rd;
     mt19937 gen(rd());
-    uniform_int_distribution<> secDist(100, 200); // 10 securities
+    uniform_int_distribution<> secDist(1, 1000); // 10 securities
     uniform_int_distribution<> qtyDist(1000, 2000);
-    uniform_int_distribution<> userDist(1000, 2000); // 20 users
-    uniform_int_distribution<> companyDist(250, 500); // 5 companies
+    uniform_int_distribution<> userDist(1, 1000); // 20 users
+    uniform_int_distribution<> companyDist(1, 1000); // 5 companies
     uniform_int_distribution<> sideDist(0, 1); // 0: Buy, 1: Sell
 
     for (int size : testSizes) {
@@ -27,16 +26,20 @@ void runBenchmark(unsigned int numOrders) {
 
         // Generate orders
         vector<Order> orders;
+        vector<string> userIDs;
+        vector<string> secIDs;
         orders.reserve(size);
         for (int i = 1; i <= size; ++i) {
             stringstream ordId;
             ordId << "BenchOrd" << i;
             stringstream secId;
             secId << "SecId" << secDist(gen);
+			secIDs.push_back(secId.str());
             string side = (sideDist(gen) == 0) ? "Buy" : "Sell";
             unsigned int qty = qtyDist(gen);
             stringstream user;
             user << "User" << userDist(gen);
+			userIDs.push_back(user.str());
             stringstream company;
             company << "Company" << companyDist(gen);
             orders.emplace_back(ordId.str(), secId.str(), side, qty, user.str(), company.str());
@@ -74,6 +77,7 @@ void runBenchmark(unsigned int numOrders) {
         double matchSizeAvg = static_cast<double>(matchSizeDuration.count()) / 10;
         cout << "getMatchingSizeForSecurity: Total = " << matchSizeDuration.count()
             << " us, Avg per security = " << fixed << setprecision(2) << matchSizeAvg << " us\n";
+        cout << "Total Orders matching: " << totalMatching << "\n";
 
         // Benchmark cancelOrder
         int numToCancel = size / 10;
@@ -94,10 +98,13 @@ void runBenchmark(unsigned int numOrders) {
             << fixed << setprecision(2) << cancelOrderAvg << " us\n";
 
         // Benchmark cancelOrdersForUser
-        stringstream randUser;
-        randUser << "User" << userDist(gen);
-        start = chrono::high_resolution_clock::now();
-        cache.cancelOrdersForUser(randUser.str());
+         start = chrono::high_resolution_clock::now();
+        try {
+
+            cache.cancelOrdersForUser(userIDs[0]);
+        } catch (const exception& e) {
+            cerr << "Exception during cancelOrdersForUser: " << e.what() << "\n";
+		}
         end = chrono::high_resolution_clock::now();
         auto cancelUserDuration = chrono::duration_cast<chrono::microseconds>(end - start);
         cout << "cancelOrdersForUser: Total = " << cancelUserDuration.count() << " us\n";
@@ -106,7 +113,11 @@ void runBenchmark(unsigned int numOrders) {
         stringstream randSec;
         randSec << "SecId" << secDist(gen);
         start = chrono::high_resolution_clock::now();
-        cache.cancelOrdersForSecIdWithMinimumQty(randSec.str(), 500);
+        try            {
+            cache.cancelOrdersForSecIdWithMinimumQty(randSec.str(), 1500);
+        } catch (const exception& e) {
+            cerr << "Exception during cancelOrdersForSecIdWithMinimumQty: " << e.what() << "\n";
+		}
         end = chrono::high_resolution_clock::now();
         auto cancelMinQtyDuration = chrono::duration_cast<chrono::microseconds>(end - start);
         cout << "cancelOrdersForSecIdWithMinimumQty: Total = " << cancelMinQtyDuration.count() << " us\n";
@@ -114,7 +125,7 @@ void runBenchmark(unsigned int numOrders) {
         // Verify order count
         auto remainingOrders = cache.getAllOrders();
         cout << "Orders remaining after operations: " << remainingOrders.size() << "\n";
-		cout << "All time tests: " << (cancelMinQtyDuration.count() + cancelUserDuration.count() + cancelOrderDuration.count() + matchSizeDuration.count() + getAllOrdersDuration.count() + addOrderDuration.count()) << " us\n";
+        cout << "All time tests: " << (cancelMinQtyDuration.count() + cancelUserDuration.count() + cancelOrderDuration.count() + matchSizeDuration.count() + getAllOrdersDuration.count() + addOrderDuration.count()) << " us\n";
         cout << "Benchmark for " << size << " orders completed.\n";
     }
 

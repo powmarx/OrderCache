@@ -14,12 +14,12 @@ void OrderCache::addOrder(Order order) {
 
     // Update indexes with collision mitigation
     auto& secSet = ordersBySecurity_[securityId];
-    if (secSet.empty()) secSet.reserve(10000); // Preallocate for ~10,000 orders
+    if (secSet.empty()) secSet.reserve(50000); // Preallocate for ~50,000 orders
     secSet.max_load_factor(0.7F); // Reduce collisions
     secSet.insert(orderId); // O(1) average case
 
     auto& userSet = ordersByUser_[user];
-    if (userSet.empty()) userSet.reserve(5000); // Preallocate for ~5,000 orders
+    if (userSet.empty()) userSet.reserve(50000); // Preallocate for ~50,000 orders
     userSet.max_load_factor(0.7F); // Reduce collisions
     userSet.insert(orderId); // O(1) average case
 }
@@ -28,7 +28,6 @@ void OrderCache::cancelOrder(const string& orderId) {
     // Single lookup in main storage
     auto orderIt = orders_.find(orderId);
     if (orderIt == orders_.end()) {
-        // Use pre-allocated exception or simpler construction
         throw out_of_range("Order ID not found: " + orderId);
     }
 
@@ -63,7 +62,9 @@ void OrderCache::cancelOrder(const string& orderId) {
 }
 void OrderCache::cancelOrdersForUser(const string& user) {
     auto userIt = ordersByUser_.find(user);
-    if (userIt == ordersByUser_.end()) return;
+    if (userIt == ordersByUser_.end()) {
+        throw out_of_range("User ID not found: " + user);
+    }
 
     // Get copy of order IDs to avoid modifying while iterating
     auto orderIds = userIt->second; // copy of the set
@@ -97,10 +98,11 @@ void OrderCache::cancelOrdersForUser(const string& user) {
 
 void OrderCache::cancelOrdersForSecIdWithMinimumQty(const string& securityId, unsigned int minQty) {
     auto secIt = ordersBySecurity_.find(securityId);
-    if (secIt == ordersBySecurity_.end()) return;
+    if (secIt == ordersBySecurity_.end()) {
+        throw out_of_range("Security ID not found: " + securityId);
+    }
 
-    // Get copy to avoid modifying while iterating
-    auto orderIds = secIt->second; // copy of the set
+    auto orderIds = secIt->second;
 
     for (const auto& orderId : orderIds) {
         auto orderIt = orders_.find(orderId);
@@ -108,7 +110,6 @@ void OrderCache::cancelOrdersForSecIdWithMinimumQty(const string& securityId, un
             const Order& order = orderIt->second;
             const string& user = order.user();
 
-            // Remove from user index
             auto userIt = ordersByUser_.find(user);
             if (userIt != ordersByUser_.end()) {
                 auto& userOrders = userIt->second;
@@ -143,39 +144,50 @@ unsigned int OrderCache::getMatchingSizeForSecurity(const string& securityId) {
     unordered_map<string, unsigned int> buyQtyPerCompany;
     unordered_map<string, unsigned int> sellQtyPerCompany;
 
+	// Reserve space to reduce rehashing
+    buyQtyPerCompany.reserve(orderIds.size()); // Estimate companies
+    sellQtyPerCompany.reserve(orderIds.size());
+
     // Aggregate buy and sell quantities by company
     for (const string& oid : orderIds) {
         auto oit = orders_.find(oid);
         if (oit != orders_.end()) {
             const Order& o = oit->second;
+            const string& company = o.company(); // Reference, not copy
+            unsigned int qty = o.qty();
+
             if (o.side() == "Buy") {
-                buyQtyPerCompany[o.company()] += static_cast<unsigned int>(o.qty());
+                buyQtyPerCompany[company] += qty;
             }
             else if (o.side() == "Sell") {
-                sellQtyPerCompany[o.company()] += static_cast<unsigned int>(o.qty());
+                sellQtyPerCompany[company] += qty;
             }
         }
     }
 
     // Calculate total sell quantity
     unsigned int totalSell = 0;
-    for (const auto& p : sellQtyPerCompany) {
-        totalSell += p.second;
+    for (const auto& sell : sellQtyPerCompany) {
+        totalSell += sell.second;
     }
 
     // For each buying company, match against external sells
     unsigned int potentialMatch = 0;
-    for (const auto& p : buyQtyPerCompany) {
-        const string& comp = p.first;
-        unsigned int buyQ = p.second;
-        unsigned int selfSell = sellQtyPerCompany.count(comp) ? sellQtyPerCompany.at(comp) : 0ULL;
-        unsigned int externalSell = (totalSell > selfSell) ? (totalSell - selfSell) : 0ULL;
+    for (const auto& buy : buyQtyPerCompany) {
+        const string& comp = buy.first;
+        unsigned int buyQ = buy.second;
+
+		// For matching requirements, only consider sells from other companies
+        unsigned int selfSell = sellQtyPerCompany.count(comp) ? sellQtyPerCompany.at(comp) : 0;
+        unsigned int externalSell = (totalSell > selfSell) ? (totalSell - selfSell) : 0;
+        
+        // Sels only with buyers needs!
         potentialMatch += min(buyQ, externalSell);
     }
 
     // Cap by total sell to handle shared sell quantities
     unsigned int result = min(potentialMatch, totalSell);
-    return static_cast<unsigned int>(result);
+    return result;
 }
 
 vector<Order> OrderCache::getAllOrders() const {

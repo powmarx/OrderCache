@@ -14,10 +14,12 @@ int main() {
         cout << "1. Run Example 1 Tests\n";
         cout << "2. Run Example 2 Tests\n";
         cout << "3. Run Example 3 Tests\n";
-        cout << "4. Run Stress Test\n";
-        cout << "5. Run Performance Benchmarks\n";
-        cout << "6. Exit\n";
-        cout << "Enter your choice (1-6): ";
+        cout << "4. Run Example 4 Tests (only 1 company)\n";
+        cout << "5. Run Overmatch Tests\n";
+        cout << "40. Run Stress Test\n";
+        cout << "50. Run Performance Benchmarks\n";
+        cout << "99. Exit\n";
+        cout << "Enter your choice (1-99): ";
 
         int choice;
         if (!(cin >> choice)) {
@@ -26,7 +28,7 @@ int main() {
             continue;
         }
 
-        if (choice == 6) {
+        if (choice == 99) {
             cout << "Exiting Test Runner.\n";
             break;
         }
@@ -41,7 +43,13 @@ int main() {
         case 3:
             runExample3Tests();
             break;
-        case 4: {
+        case 4:
+            runExample4Tests();
+            break;
+        case 5:
+            runOverMatchTest();
+            break;
+        case 40: {
             int numOrders;
             cout << "Enter number of orders for stress test (1-1000000): ";
             if (!(cin >> numOrders) || numOrders < 1 || numOrders > 1000000) {
@@ -52,7 +60,7 @@ int main() {
             runStressTest(numOrders);
             break;
         }
-        case 5: {
+        case 50: {
             int numOrders;
             cout << "Enter number of orders for benchmark (1-1000000, or 0 for default sizes): ";
             if (!(cin >> numOrders) || numOrders < 0 || numOrders > 1000000) {
