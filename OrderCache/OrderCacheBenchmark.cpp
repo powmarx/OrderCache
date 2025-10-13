@@ -11,7 +11,7 @@
 
 void runBenchmark(unsigned int numOrders) {
     cout << "\nRunning Performance Benchmarks...\n";
-    vector<unsigned int> testSizes = (numOrders == 0) ? vector<unsigned>{100, 1000, 10000} : vector<unsigned int>{ numOrders };
+    vector<unsigned int> testSizes = (numOrders == 0) ? vector<unsigned>{1000, 100000, 1000000} : vector<unsigned int>{ numOrders };
     // Seed random number generator
     random_device rd;
     mt19937 gen(rd());

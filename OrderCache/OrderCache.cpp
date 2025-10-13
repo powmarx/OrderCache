@@ -17,7 +17,9 @@ void OrderCache::addOrder(Order order) {
     unique_lock<shared_mutex> userLock(userIndexMutex_);
 
     // Add to main storage
-    orders_.emplace(orderId, order);
+    if (!(orders_.try_emplace(orderId, order)).second) {
+        throw invalid_argument("Duplicate Order ID: " + orderId);
+    }; // O(1) average case
 
     // Update indexes with collision mitigation
     auto& secSet = ordersBySecurity_[securityId];
@@ -140,21 +142,23 @@ void OrderCache::cancelOrdersForSecIdWithMinimumQty(const string& securityId, un
 
 unsigned int OrderCache::getMatchingSizeForSecurity(const string& securityId) {
     // Use read locks for this query operation
-    shared_lock<shared_mutex> securityLock(securityIndexMutex_);
-    shared_lock<shared_mutex> ordersLock(ordersMutex_);
-
-    auto secIt = ordersBySecurity_.find(securityId);
-    if (secIt == ordersBySecurity_.end()) {
-        return 0;
+    unordered_set<string> orderIdsCopy;
+    {
+        shared_lock<shared_mutex> securityLock(securityIndexMutex_);
+        auto secIt = ordersBySecurity_.find(securityId);
+        if (secIt == ordersBySecurity_.end()) {
+            return 0;
+        }
+        orderIdsCopy = secIt->second; // Safe copy
     }
 
-    const auto& orderIds = secIt->second;
-
+    // Step 2: Process orders (protected by read lock)
+    shared_lock<shared_mutex> ordersLock(ordersMutex_);
     unordered_map<string, unsigned int> buyQtyPerCompany;
     unordered_map<string, unsigned int> sellQtyPerCompany;
 
     // Aggregate buy and sell quantities by company
-    for (const string& oid : orderIds) {
+    for (const string& oid : orderIdsCopy) {
         auto oit = orders_.find(oid);
         if (oit != orders_.end()) {
             const Order& o = oit->second;
