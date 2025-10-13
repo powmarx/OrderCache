@@ -4,28 +4,36 @@
 #include <stdexcept>
 #include <iostream>
 #include <sstream>
+#include <thread>
 
 void OrderCache::addOrder(Order order) {
     const string& orderId = order.orderId();
     const string& securityId = order.securityId();
-    const string& user = order.user();// Add to main storage
-    
-    orders_.emplace(orderId, order); // O(1) average case
+    const string& user = order.user();
+
+    // Acquire all write locks
+    unique_lock<shared_mutex> ordersLock(ordersMutex_);
+    unique_lock<shared_mutex> securityLock(securityIndexMutex_);
+    unique_lock<shared_mutex> userLock(userIndexMutex_);
+
+    // Add to main storage
+    orders_.emplace(orderId, order);
 
     // Update indexes with collision mitigation
     auto& secSet = ordersBySecurity_[securityId];
-    if (secSet.empty()) secSet.reserve(50000); // Preallocate for ~50,000 orders
-    secSet.max_load_factor(0.7F); // Reduce collisions
-    secSet.insert(orderId); // O(1) average case
+    if (secSet.empty()) secSet.reserve(50000);
+    secSet.max_load_factor(0.7F);
+    secSet.insert(orderId);
 
     auto& userSet = ordersByUser_[user];
-    if (userSet.empty()) userSet.reserve(50000); // Preallocate for ~50,000 orders
-    userSet.max_load_factor(0.7F); // Reduce collisions
-    userSet.insert(orderId); // O(1) average case
+    if (userSet.empty()) userSet.reserve(50000);
+    userSet.max_load_factor(0.7F);
+    userSet.insert(orderId);
 }
 
 void OrderCache::cancelOrder(const string& orderId) {
-    // Single lookup in main storage
+    // First, find the order with read lock
+    shared_lock<shared_mutex> ordersReadLock(ordersMutex_);
     auto orderIt = orders_.find(orderId);
     if (orderIt == orders_.end()) {
         throw out_of_range("Order ID not found: " + orderId);
@@ -34,20 +42,30 @@ void OrderCache::cancelOrder(const string& orderId) {
     const Order& order = orderIt->second;
     const string& securityId = order.securityId();
     const string& user = order.user();
+    ordersReadLock.unlock(); // Release read lock
 
-    // Optimize security index removal O(1)
+    // Acquire write locks for modification
+    unique_lock<shared_mutex> ordersWriteLock(ordersMutex_);
+    unique_lock<shared_mutex> securityLock(securityIndexMutex_);
+    unique_lock<shared_mutex> userLock(userIndexMutex_);
+
+    // Re-validate order still exists (could have been deleted by another thread)
+    orderIt = orders_.find(orderId);
+    if (orderIt == orders_.end()) {
+        throw out_of_range("Order ID not found (concurrently deleted): " + orderId);
+    }
+
+    // Remove from security index
     auto secIt = ordersBySecurity_.find(securityId);
     if (secIt != ordersBySecurity_.end()) {
         auto& secOrders = secIt->second;
-        // Use unordered_set for O(1) removal
         secOrders.erase(orderId);
-		// For efficiency, only erase the map entry if the set is empty
         if (secOrders.empty()) {
             ordersBySecurity_.erase(secIt);
         }
     }
 
-    // Optimize user index removal
+    // Remove from user index
     auto userIt = ordersByUser_.find(user);
     if (userIt != ordersByUser_.end()) {
         auto& userOrders = userIt->second;
@@ -57,83 +75,74 @@ void OrderCache::cancelOrder(const string& orderId) {
         }
     }
 
-    // Remove from main storage last (for exception safety)
-    orders_.erase(orderIt);
+    // Remove from main storage
+    orders_.erase(orderId);
 }
+
 void OrderCache::cancelOrdersForUser(const string& user) {
+    // Get user's orders with read lock
+    shared_lock<shared_mutex> userReadLock(userIndexMutex_);
     auto userIt = ordersByUser_.find(user);
     if (userIt == ordersByUser_.end()) {
         throw out_of_range("User ID not found: " + user);
     }
 
-    // Get copy of order IDs to avoid modifying while iterating
-    auto orderIds = userIt->second; // copy of the set
+    // Copy order IDs while holding the lock
+    auto orderIds = userIt->second;
+    userReadLock.unlock();
 
-    // Remove each order using the existing cancelOrder logic
+    // Cancel each order individually (they handle their own locking)
     for (const auto& orderId : orderIds) {
-        // Reuse the same pattern as cancelOrder
-        auto orderIt = orders_.find(orderId);
-        if (orderIt != orders_.end()) {
-            const Order& order = orderIt->second;
-            const string& securityId = order.securityId();
-
-            // Remove from security index
-            auto secIt = ordersBySecurity_.find(securityId);
-            if (secIt != ordersBySecurity_.end()) {
-                auto& secOrders = secIt->second;
-                secOrders.erase(orderId);
-                if (secOrders.empty()) {
-                    ordersBySecurity_.erase(secIt);
-                }
-            }
-
-            // Remove from main storage
-            orders_.erase(orderIt);
+        try {
+            cancelOrder(orderId);
+        }
+        catch (const out_of_range&) {
+            // Order might have been concurrently deleted - continue
         }
     }
 
-    // Remove the user index entry
-    ordersByUser_.erase(userIt);
+    // Final cleanup - user entry should be empty now, but double-check
+    unique_lock<shared_mutex> userWriteLock(userIndexMutex_);
+    userIt = ordersByUser_.find(user);
+    if (userIt != ordersByUser_.end() && userIt->second.empty()) {
+        ordersByUser_.erase(userIt);
+    }
 }
 
 void OrderCache::cancelOrdersForSecIdWithMinimumQty(const string& securityId, unsigned int minQty) {
+    // Get security's orders with read lock
+    shared_lock<shared_mutex> securityReadLock(securityIndexMutex_);
     auto secIt = ordersBySecurity_.find(securityId);
     if (secIt == ordersBySecurity_.end()) {
         throw out_of_range("Security ID not found: " + securityId);
     }
 
+    // Copy order IDs while holding the lock
     auto orderIds = secIt->second;
+    securityReadLock.unlock();
 
+    // Cancel qualifying orders
     for (const auto& orderId : orderIds) {
-        auto orderIt = orders_.find(orderId);
-        if (orderIt != orders_.end() && orderIt->second.qty() >= minQty) {
-            const Order& order = orderIt->second;
-            const string& user = order.user();
-
-            auto userIt = ordersByUser_.find(user);
-            if (userIt != ordersByUser_.end()) {
-                auto& userOrders = userIt->second;
-                userOrders.erase(orderId);
-                if (userOrders.empty()) {
-                    ordersByUser_.erase(userIt);
-                }
+        try {
+            // Check if order meets quantity criteria
+            shared_lock<shared_mutex> ordersReadLock(ordersMutex_);
+            auto orderIt = orders_.find(orderId);
+            if (orderIt != orders_.end() && orderIt->second.qty() >= minQty) {
+                ordersReadLock.unlock();
+                cancelOrder(orderId);
             }
-
-            // Remove from main storage
-            orders_.erase(orderIt);
-
-            // Remove from the security index (current set we're iterating on copy)
-            secIt->second.erase(orderId);
         }
-    }
-
-    // Clean up empty security entry
-    if (secIt->second.empty()) {
-        ordersBySecurity_.erase(secIt);
+        catch (const out_of_range&) {
+            // Order might have been concurrently deleted - continue
+        }
     }
 }
 
 unsigned int OrderCache::getMatchingSizeForSecurity(const string& securityId) {
+    // Use read locks for this query operation
+    shared_lock<shared_mutex> securityLock(securityIndexMutex_);
+    shared_lock<shared_mutex> ordersLock(ordersMutex_);
+
     auto secIt = ordersBySecurity_.find(securityId);
     if (secIt == ordersBySecurity_.end()) {
         return 0;
@@ -144,23 +153,16 @@ unsigned int OrderCache::getMatchingSizeForSecurity(const string& securityId) {
     unordered_map<string, unsigned int> buyQtyPerCompany;
     unordered_map<string, unsigned int> sellQtyPerCompany;
 
-	// Reserve space to reduce rehashing
-    buyQtyPerCompany.reserve(orderIds.size()); // Estimate companies
-    sellQtyPerCompany.reserve(orderIds.size());
-
     // Aggregate buy and sell quantities by company
     for (const string& oid : orderIds) {
         auto oit = orders_.find(oid);
         if (oit != orders_.end()) {
             const Order& o = oit->second;
-            const string& company = o.company(); // Reference, not copy
-            unsigned int qty = o.qty();
-
             if (o.side() == "Buy") {
-                buyQtyPerCompany[company] += qty;
+                buyQtyPerCompany[o.company()] += o.qty();
             }
             else if (o.side() == "Sell") {
-                sellQtyPerCompany[company] += qty;
+                sellQtyPerCompany[o.company()] += o.qty();
             }
         }
     }
@@ -177,24 +179,23 @@ unsigned int OrderCache::getMatchingSizeForSecurity(const string& securityId) {
         const string& comp = buy.first;
         unsigned int buyQ = buy.second;
 
-		// For matching requirements, only consider sells from other companies
         unsigned int selfSell = sellQtyPerCompany.count(comp) ? sellQtyPerCompany.at(comp) : 0;
         unsigned int externalSell = (totalSell > selfSell) ? (totalSell - selfSell) : 0;
-        
-        // Sels only with buyers needs!
+
         potentialMatch += min(buyQ, externalSell);
     }
 
-    // Cap by total sell to handle shared sell quantities
     unsigned int result = min(potentialMatch, totalSell);
     return result;
 }
 
 vector<Order> OrderCache::getAllOrders() const {
     vector<Order> result;
+    shared_lock<shared_mutex> ordersLock(ordersMutex_); // Read lock for queries
     result.reserve(orders_.size());
     for (const auto& pair : orders_) {
         result.push_back(pair.second);
     }
     return result;
 }
+
