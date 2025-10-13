@@ -4,12 +4,12 @@
 #include <stdexcept>
 #include <iostream>
 #include <sstream>
-using namespace std;
 
 void OrderCache::addOrder(Order order) {
-    const std::string& orderId = order.orderId();
-    const std::string& securityId = order.securityId();
-    const std::string& user = order.user();// Add to main storage
+    const string& orderId = order.orderId();
+    const string& securityId = order.securityId();
+    const string& user = order.user();// Add to main storage
+    
     orders_.emplace(orderId, order); // O(1) average case
 
     // Update indexes with collision mitigation
@@ -24,17 +24,17 @@ void OrderCache::addOrder(Order order) {
     userSet.insert(orderId); // O(1) average case
 }
 
-void OrderCache::cancelOrder(const std::string& orderId) {
+void OrderCache::cancelOrder(const string& orderId) {
     // Single lookup in main storage
     auto orderIt = orders_.find(orderId);
     if (orderIt == orders_.end()) {
         // Use pre-allocated exception or simpler construction
-        throw std::out_of_range("Order ID not found: " + orderId);
+        throw out_of_range("Order ID not found: " + orderId);
     }
 
     const Order& order = orderIt->second;
-    const std::string& securityId = order.securityId();
-    const std::string& user = order.user();
+    const string& securityId = order.securityId();
+    const string& user = order.user();
 
     // Optimize security index removal O(1)
     auto secIt = ordersBySecurity_.find(securityId);
@@ -61,7 +61,7 @@ void OrderCache::cancelOrder(const std::string& orderId) {
     // Remove from main storage last (for exception safety)
     orders_.erase(orderIt);
 }
-void OrderCache::cancelOrdersForUser(const std::string& user) {
+void OrderCache::cancelOrdersForUser(const string& user) {
     auto userIt = ordersByUser_.find(user);
     if (userIt == ordersByUser_.end()) return;
 
@@ -74,7 +74,7 @@ void OrderCache::cancelOrdersForUser(const std::string& user) {
         auto orderIt = orders_.find(orderId);
         if (orderIt != orders_.end()) {
             const Order& order = orderIt->second;
-            const std::string& securityId = order.securityId();
+            const string& securityId = order.securityId();
 
             // Remove from security index
             auto secIt = ordersBySecurity_.find(securityId);
@@ -95,7 +95,7 @@ void OrderCache::cancelOrdersForUser(const std::string& user) {
     ordersByUser_.erase(userIt);
 }
 
-void OrderCache::cancelOrdersForSecIdWithMinimumQty(const std::string& securityId, unsigned int minQty) {
+void OrderCache::cancelOrdersForSecIdWithMinimumQty(const string& securityId, unsigned int minQty) {
     auto secIt = ordersBySecurity_.find(securityId);
     if (secIt == ordersBySecurity_.end()) return;
 
@@ -106,7 +106,7 @@ void OrderCache::cancelOrdersForSecIdWithMinimumQty(const std::string& securityI
         auto orderIt = orders_.find(orderId);
         if (orderIt != orders_.end() && orderIt->second.qty() >= minQty) {
             const Order& order = orderIt->second;
-            const std::string& user = order.user();
+            const string& user = order.user();
 
             // Remove from user index
             auto userIt = ordersByUser_.find(user);
@@ -132,7 +132,7 @@ void OrderCache::cancelOrdersForSecIdWithMinimumQty(const std::string& securityI
     }
 }
 
-unsigned int OrderCache::getMatchingSizeForSecurity(const std::string& securityId) {
+unsigned int OrderCache::getMatchingSizeForSecurity(const string& securityId) {
     auto secIt = ordersBySecurity_.find(securityId);
     if (secIt == ordersBySecurity_.end()) {
         return 0;
@@ -140,11 +140,11 @@ unsigned int OrderCache::getMatchingSizeForSecurity(const std::string& securityI
 
     const auto& orderIds = secIt->second;
 
-    std::unordered_map<std::string, unsigned int> buyQtyPerCompany;
-    std::unordered_map<std::string, unsigned int> sellQtyPerCompany;
+    unordered_map<string, unsigned int> buyQtyPerCompany;
+    unordered_map<string, unsigned int> sellQtyPerCompany;
 
     // Aggregate buy and sell quantities by company
-    for (const std::string& oid : orderIds) {
+    for (const string& oid : orderIds) {
         auto oit = orders_.find(oid);
         if (oit != orders_.end()) {
             const Order& o = oit->second;
@@ -166,20 +166,20 @@ unsigned int OrderCache::getMatchingSizeForSecurity(const std::string& securityI
     // For each buying company, match against external sells
     unsigned int potentialMatch = 0;
     for (const auto& p : buyQtyPerCompany) {
-        const std::string& comp = p.first;
+        const string& comp = p.first;
         unsigned int buyQ = p.second;
         unsigned int selfSell = sellQtyPerCompany.count(comp) ? sellQtyPerCompany.at(comp) : 0ULL;
         unsigned int externalSell = (totalSell > selfSell) ? (totalSell - selfSell) : 0ULL;
-        potentialMatch += std::min(buyQ, externalSell);
+        potentialMatch += min(buyQ, externalSell);
     }
 
     // Cap by total sell to handle shared sell quantities
-    unsigned int result = std::min(potentialMatch, totalSell);
+    unsigned int result = min(potentialMatch, totalSell);
     return static_cast<unsigned int>(result);
 }
 
-std::vector<Order> OrderCache::getAllOrders() const {
-    std::vector<Order> result;
+vector<Order> OrderCache::getAllOrders() const {
+    vector<Order> result;
     result.reserve(orders_.size());
     for (const auto& pair : orders_) {
         result.push_back(pair.second);

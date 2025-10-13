@@ -13,10 +13,11 @@ int main() {
         std::cout << "\nOrderCache Test Runner Menu\n";
         std::cout << "1. Run Example 1 Tests\n";
         std::cout << "2. Run Example 2 Tests\n";
-        std::cout << "3. Run Stress Test\n";
-        std::cout << "4. Run Performance Benchmarks\n";
-        std::cout << "5. Exit\n";
-        std::cout << "Enter your choice (1-5): ";
+        std::cout << "3. Run Example 3 Tests\n";
+        std::cout << "4. Run Stress Test\n";
+        std::cout << "5. Run Performance Benchmarks\n";
+        std::cout << "6. Exit\n";
+        std::cout << "Enter your choice (1-6): ";
 
         int choice;
         if (!(std::cin >> choice)) {
@@ -25,7 +26,7 @@ int main() {
             continue;
         }
 
-        if (choice == 5) {
+        if (choice == 6) {
             std::cout << "Exiting Test Runner.\n";
             break;
         }
@@ -37,7 +38,10 @@ int main() {
         case 2:
             runExample2Tests();
             break;
-        case 3: {
+        case 3:
+            runExample3Tests();
+            break;
+        case 4: {
             int numOrders;
             std::cout << "Enter number of orders for stress test (1-1000000): ";
             if (!(std::cin >> numOrders) || numOrders < 1 || numOrders > 1000000) {
@@ -48,7 +52,7 @@ int main() {
             runStressTest(numOrders);
             break;
         }
-        case 4: {
+        case 5: {
             int numOrders;
             std::cout << "Enter number of orders for benchmark (1-1000000, or 0 for default sizes): ";
             if (!(std::cin >> numOrders) || numOrders < 0 || numOrders > 1000000) {

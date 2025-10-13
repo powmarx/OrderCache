@@ -24,7 +24,7 @@ void runStressTest(unsigned int numOrders) {
     std::uniform_int_distribution<> sideDist(0, 1); // 0: Buy, 1: Sell
 
     // Add numOrders random orders
-    for (int i = 1; i <= numOrders; ++i) {
+    for (unsigned int i = 1; i <= numOrders; ++i) {
         std::stringstream ordId;
         ordId << "StressOrd" << i;
         std::stringstream secId;

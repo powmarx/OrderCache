@@ -170,3 +170,45 @@ void runExample2Tests() {
 
     std::cout << "Example 2 Tests Passed!\n";
 }
+
+void runExample3Tests() {
+    std::cout << "\nRunning Example Test 3...\n";
+
+    OrderCache cache;
+
+    // Add orders from the example
+    std::vector<Order> orders = {
+        Order("OrdId1", "SecId1", "Buy", 1000, "User1", "CompanyA"),
+        Order("OrdId2", "SecId2", "Sell", 3000, "User2", "CompanyB"),
+        Order("OrdId3", "SecId1", "Sell", 500, "User3", "CompanyA"),
+        Order("OrdId4", "SecId2", "Buy", 600, "User4", "CompanyC"),
+        Order("OrdId5", "SecId2", "Buy", 100, "User5", "CompanyB"),
+        Order("OrdId6", "SecId3", "Buy", 1000, "User6", "CompanyD"),
+        Order("OrdId7", "SecId2", "Buy", 2000, "User7", "CompanyE"),
+        Order("OrdId8", "SecId2", "Sell", 5000, "User8", "CompanyE")
+    };
+
+    // Add orders to cache
+    for (const auto& order : orders) {
+        cache.addOrder(order);
+    }
+
+    // Verify order count
+    auto allOrders = cache.getAllOrders();
+    assert(allOrders.size() == 8 && "Expected 8 orders in cache");
+
+    // Single-threaded test: Calculate total matching quantity
+    unsigned int totalMatchingQty = 0;
+    std::vector<std::string> securities = { "SecId1", "SecId2", "SecId3" };
+    for (const auto& secId : securities) {
+        unsigned int qty = cache.getMatchingSizeForSecurity(secId);
+        std::cout << "Matching size for " << secId << ": " << qty << "\n";
+        totalMatchingQty += qty;
+    }
+
+    std::cout << "Total matching quantity (single-threaded): " << totalMatchingQty << "\n";
+    assert(totalMatchingQty == 2700 && "Expected total matching quantity of 2700");
+
+
+    std::cout << "Example Test 3 Passed!\n";
+}
