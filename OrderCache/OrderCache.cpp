@@ -16,12 +16,12 @@ void OrderCache::addOrder(Order order) {
 
     // Update indexes with collision mitigation
     auto& secSet = ordersBySecurity_[securityId];
-    if (secSet.empty()) secSet.reserve(50000); // Preallocate for ~50,000 orders
+    if (secSet.empty()) secSet.reserve(10000); // Preallocate for ~10,000 orders
     secSet.max_load_factor(0.7F); // Reduce collisions
     secSet.insert(orderId); // O(1) average case
 
     auto& userSet = ordersByUser_[user];
-    if (userSet.empty()) userSet.reserve(50000); // Preallocate for ~50,000 orders
+    if (userSet.empty()) userSet.reserve(10000); // Preallocate for ~10,000 orders
     userSet.max_load_factor(0.7F); // Reduce collisions
     userSet.insert(orderId); // O(1) average case
 }
@@ -69,33 +69,15 @@ void OrderCache::cancelOrdersForUser(const string& user) {
     }
 
     // Get copy of order IDs to avoid modifying while iterating
-    auto orderIds = userIt->second; // copy of the set
+    auto orderIds = userIt->second;
 
     // Remove each order using the existing cancelOrder logic
     for (const auto& orderId : orderIds) {
         // Reuse the same pattern as cancelOrder
         auto orderIt = orders_.find(orderId);
-        if (orderIt != orders_.end()) {
-            const Order& order = orderIt->second;
-            const string& securityId = order.securityId();
-
-            // Remove from security index
-            auto secIt = ordersBySecurity_.find(securityId);
-            if (secIt != ordersBySecurity_.end()) {
-                auto& secOrders = secIt->second;
-                secOrders.erase(orderId);
-                if (secOrders.empty()) {
-                    ordersBySecurity_.erase(secIt);
-                }
-            }
-
-            // Remove from main storage
-            orders_.erase(orderIt);
-        }
+		cancelOrder(orderIt->first); // Reuse existing method for consistency and safety
     }
 
-    // Remove the user index entry
-    ordersByUser_.erase(userIt);
 }
 
 void OrderCache::cancelOrdersForSecIdWithMinimumQty(const string& securityId, unsigned int minQty) {
@@ -109,35 +91,16 @@ void OrderCache::cancelOrdersForSecIdWithMinimumQty(const string& securityId, un
     for (const auto& orderId : orderIds) {
         auto orderIt = orders_.find(orderId);
         if (orderIt != orders_.end() && orderIt->second.qty() >= minQty) {
-            const Order& order = orderIt->second;
-            const string& user = order.user();
 
-            auto userIt = ordersByUser_.find(user);
-            if (userIt != ordersByUser_.end()) {
-                auto& userOrders = userIt->second;
-                userOrders.erase(orderId);
-                if (userOrders.empty()) {
-                    ordersByUser_.erase(userIt);
-                }
-            }
-
-            // Remove from main storage
-            orders_.erase(orderIt);
-
-            // Remove from the security index (current set we're iterating on copy)
-            secIt->second.erase(orderId);
+			cancelOrder(orderId); // Reuse existing method for consistency and safety
         }
-    }
-
-    // Clean up empty security entry
-    if (secIt->second.empty()) {
-        ordersBySecurity_.erase(secIt);
     }
 }
 
 unsigned int OrderCache::getMatchingSizeForSecurity(const string& securityId) {
     auto secIt = ordersBySecurity_.find(securityId);
     if (secIt == ordersBySecurity_.end()) {
+		// Could be an error code or -1 for not found, but no specs about it
         return 0;
     }
 
