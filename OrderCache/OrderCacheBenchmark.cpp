@@ -11,14 +11,14 @@
 
 void runBenchmark(unsigned int numOrders) {
     cout << "\nRunning Performance Benchmarks...\n";
-    vector<unsigned int> testSizes = (numOrders == 0) ? vector<unsigned>{100, 1000, 10000} : vector<unsigned int>{ numOrders };
+    vector<unsigned int> testSizes = (numOrders == 0) ? vector<unsigned>{10000, 100000, 1000000, 10000000} : vector<unsigned int>{ numOrders };
     // Seed random number generator
     random_device rd;
     mt19937 gen(rd());
-    uniform_int_distribution<> secDist(1, 1000); // 10 securities
+    uniform_int_distribution<> secDist(1, 100); // 10 securities
     uniform_int_distribution<> qtyDist(1000, 2000);
-    uniform_int_distribution<> userDist(1, 1000); // 20 users
-    uniform_int_distribution<> companyDist(1, 1000); // 5 companies
+    uniform_int_distribution<> userDist(1, 100); // 20 users
+    uniform_int_distribution<> companyDist(1, 100); // 5 companies
     uniform_int_distribution<> sideDist(0, 1); // 0: Buy, 1: Sell
 
     for (int size : testSizes) {

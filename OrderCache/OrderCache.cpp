@@ -21,7 +21,7 @@ void OrderCache::addOrder(Order order) {
     secSet.insert(orderId); // O(1) average case
 
     auto& userSet = ordersByUser_[user];
-    if (userSet.empty()) userSet.reserve(10000); // Preallocate for ~10,000 orders
+    if (userSet.empty()) userSet.reserve(5000); // Preallocate for ~10,000 orders
     userSet.max_load_factor(0.7F); // Reduce collisions
     userSet.insert(orderId); // O(1) average case
 }
