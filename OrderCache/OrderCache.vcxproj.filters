@@ -41,5 +41,8 @@
     <ClInclude Include="OrderCacheTestUtils.h">
       <Filter>Arquivos de Origem</Filter>
     </ClInclude>
+    <ClInclude Include="StripedThreadsafeArray.h">
+      <Filter>Arquivos de Origem</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
