@@ -15,7 +15,7 @@ void runBenchmark(unsigned int numOrders) {
     // Seed random number generator
     random_device rd;
     mt19937 gen(rd());
-    uniform_int_distribution<> secDist(1, 100); // 10 securities
+    uniform_int_distribution<> secDist(1, 10); // 10 securities
     uniform_int_distribution<> qtyDist(1000, 2000);
     uniform_int_distribution<> userDist(1, 100); // 20 users
     uniform_int_distribution<> companyDist(1, 100); // 5 companies
