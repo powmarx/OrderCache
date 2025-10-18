@@ -65,7 +65,7 @@ void OrderCache::cancelOrdersForUser(const string& user) {
     }
 
     // Get copy of order IDs to avoid modifying while iterating
-    auto& orderIds = ordersByUser_[user];
+    auto orderIds = ordersByUser_[user];
 
     // Remove each order using the existing cancelOrder logic
     for (const string& orderId : orderIds) {
@@ -82,7 +82,7 @@ void OrderCache::cancelOrdersForSecIdWithMinimumQty(const string& securityId, un
 
     auto orderIds = ordersBySecurity_[securityId];
 
-    for (const auto& orderId : orderIds) {
+    for (const string& orderId : orderIds) {
         if (orders_.contains(orderId)) {
 			const auto& order = orders_[orderId];
             if (order.qty() >= minQty) {
