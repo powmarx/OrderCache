@@ -18,13 +18,16 @@ void runExample1Tests() {
     cacheBuy.addOrder(Order("OrdId6", "SecId3", "Buy", 600, "User3", "Company1"));
     cacheBuy.addOrder(Order("OrdId7", "SecId1", "Sell", 700, "User10", "Company2"));
     cacheBuy.addOrder(Order("OrdId8", "SecId1", "Sell", 800, "User2", "Company1"));
-    cacheBuy.addOrder(Order("OrdId9", "SecId2", "Buy", 900, "User6", "Company2"));
+    cacheBuy.addOrder(Order("OrdId9", "SecId2", "Buy", 900, "User2", "Company2"));
     cacheBuy.addOrder(Order("OrdId10", "SecId2", "Sell", 1000, "User5", "Company1"));
     cacheBuy.addOrder(Order("OrdId11", "SecId1", "Sell", 1100, "User13", "Company2"));
-    cacheBuy.addOrder(Order("OrdId12", "SecId2", "Buy", 1200, "User9", "Company2"));
-    cacheBuy.addOrder(Order("OrdId13", "SecId1", "Sell", 1300, "User1", "Company"));
+    cacheBuy.addOrder(Order("OrdId12", "SecId2", "Buy", 1200, "User99", "Company2"));
+    cacheBuy.addOrder(Order("OrdId13", "SecId1", "Sell", 1300, "User99", "Company"));
 
     // Test getMatchingSizeForSecurity
+    assert(cacheBuy.getMatchingSizeForSecurity("SecId1") == 300 && "SecId1 matching size should be 300");
+    assert(cacheBuy.getMatchingSizeForSecurity("SecId2") == 1000 && "SecId2 matching size should be 1000");
+    assert(cacheBuy.getMatchingSizeForSecurity("SecId3") == 600 && "SecId3 matching size should be 600");
     assert(cacheBuy.getMatchingSizeForSecurity("SecId1") == 300 && "SecId1 matching size should be 300");
     assert(cacheBuy.getMatchingSizeForSecurity("SecId2") == 1000 && "SecId2 matching size should be 1000");
     assert(cacheBuy.getMatchingSizeForSecurity("SecId3") == 600 && "SecId3 matching size should be 600");

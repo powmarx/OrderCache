@@ -5,6 +5,7 @@
 
 class Order {
 public:
+	Order() = default;
     // do not alter signature of this constructor
     Order(const std::string& ordId, const std::string& secId, const std::string& side, const unsigned int qty, const std::string& user,
           const std::string& company)

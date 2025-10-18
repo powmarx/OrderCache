@@ -10,7 +10,7 @@ void OrderCache::addOrder(Order order) {
     const string& securityId = order.securityId();
     const string& user = order.user();// Add to main storage
     
-    if (!(orders_.try_emplace(orderId, order)).second) {
+    if (!(orders_.try_emplace(orderId, order))) {
 		throw invalid_argument("Duplicate Order ID: " + orderId);
     }; // O(1) average case
 
@@ -28,83 +28,78 @@ void OrderCache::addOrder(Order order) {
 
 void OrderCache::cancelOrder(const string& orderId) {
     // Single lookup in main storage
-    auto orderIt = orders_.find(orderId);
-    if (orderIt == orders_.end()) {
+    if(!orders_.contains(orderId)){
         throw out_of_range("Order ID not found: " + orderId);
     }
 
-    const Order& order = orderIt->second;
+    const Order& order = orders_.at(orderId);
     const string& securityId = order.securityId();
     const string& user = order.user();
 
     // Optimize security index removal O(1)
-    auto secIt = ordersBySecurity_.find(securityId);
-    if (secIt != ordersBySecurity_.end()) {
-        auto& secOrders = secIt->second;
+    if (ordersBySecurity_.contains(securityId)) {
+        auto& secOrders = ordersBySecurity_[securityId];
         // Use unordered_set for O(1) removal
         secOrders.erase(orderId);
 		// For efficiency, only erase the map entry if the set is empty
         if (secOrders.empty()) {
-            ordersBySecurity_.erase(secIt);
+            ordersBySecurity_.erase(securityId);
         }
     }
 
     // Optimize user index removal
-    auto userIt = ordersByUser_.find(user);
-    if (userIt != ordersByUser_.end()) {
-        auto& userOrders = userIt->second;
+    if (ordersByUser_.contains(user)) {
+        auto& userOrders = ordersByUser_[user];
         userOrders.erase(orderId);
         if (userOrders.empty()) {
-            ordersByUser_.erase(userIt);
+            ordersByUser_.erase(user);
         }
     }
 
     // Remove from main storage last (for exception safety)
-    orders_.erase(orderIt);
+    orders_.erase(orderId);
 }
 void OrderCache::cancelOrdersForUser(const string& user) {
-    auto userIt = ordersByUser_.find(user);
-    if (userIt == ordersByUser_.end()) {
+    if (!ordersByUser_.contains(user)) {
         throw out_of_range("User ID not found: " + user);
     }
 
     // Get copy of order IDs to avoid modifying while iterating
-    auto orderIds = userIt->second;
+    auto& orderIds = ordersByUser_[user];
 
     // Remove each order using the existing cancelOrder logic
-    for (const auto& orderId : orderIds) {
+    for (const string& orderId : orderIds) {
         // Reuse the same pattern as cancelOrder
-        auto orderIt = orders_.find(orderId);
-		cancelOrder(orderIt->first); // Reuse existing method for consistency and safety
+		cancelOrder(orderId); // Reuse existing method for consistency and safety
     }
 
 }
 
 void OrderCache::cancelOrdersForSecIdWithMinimumQty(const string& securityId, unsigned int minQty) {
-    auto secIt = ordersBySecurity_.find(securityId);
-    if (secIt == ordersBySecurity_.end()) {
+    if (!ordersBySecurity_.contains(securityId)) {
         throw out_of_range("Security ID not found: " + securityId);
     }
 
-    auto orderIds = secIt->second;
+    auto orderIds = ordersBySecurity_[securityId];
 
     for (const auto& orderId : orderIds) {
-        auto orderIt = orders_.find(orderId);
-        if (orderIt != orders_.end() && orderIt->second.qty() >= minQty) {
+        if (orders_.contains(orderId)) {
+			const auto& order = orders_[orderId];
+            if (order.qty() >= minQty) {
 
-			cancelOrder(orderId); // Reuse existing method for consistency and safety
+                cancelOrder(orderId); // Reuse existing method for consistency and safety
+            }
         }
     }
 }
 
 unsigned int OrderCache::getMatchingSizeForSecurity(const string& securityId) {
-    auto secIt = ordersBySecurity_.find(securityId);
-    if (secIt == ordersBySecurity_.end()) {
+	if (!ordersBySecurity_.contains(securityId) ){
 		// Could be an error code or -1 for not found, but no specs about it
         return 0;
     }
 
-    const auto& orderIds = secIt->second;
+	const auto& orderIds = ordersBySecurity_[securityId];
 
     unordered_map<string, unsigned int> buyQtyPerCompany;
     unordered_map<string, unsigned int> sellQtyPerCompany;
@@ -115,9 +110,8 @@ unsigned int OrderCache::getMatchingSizeForSecurity(const string& securityId) {
 
     // Aggregate buy and sell quantities by company
     for (const string& oid : orderIds) {
-        auto oit = orders_.find(oid);
-        if (oit != orders_.end()) {
-            const Order& o = oit->second;
+        if (orders_.contains(oid)) {
+            const Order& o = orders_[oid];
             const string& company = o.company(); // Reference, not copy
             unsigned int qty = o.qty();
 
@@ -158,8 +152,8 @@ unsigned int OrderCache::getMatchingSizeForSecurity(const string& securityId) {
 vector<Order> OrderCache::getAllOrders() const {
     vector<Order> result;
     result.reserve(orders_.size());
-    for (const auto& pair : orders_) {
-        result.push_back(pair.second);
+    for (const auto& order: orders_.values()) {
+        result.push_back(order);
     }
     return result;
 }
