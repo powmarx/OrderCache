@@ -8,35 +8,22 @@
 #include <functional>
 #include <vector>
 #include <shared_mutex>
+#include <algorithm>
 
 template<typename Key, typename Value, typename Hash = std::hash<Key>, size_t StripeCount = 16>
 class StripedThreadSafeMap
 {
 private:
     std::unordered_map<Key, Value, Hash> data;
+    // Mutexes must be mutable to be locked by const methods using std::shared_lock
     mutable std::array<std::shared_mutex, StripeCount> mutexes;
 
-    // Helper function to get the mutex for a specific key
+    // @brief Helper function to get the mutex for a specific key
     std::shared_mutex& get_mutex_for_key(const Key& key) const
     {
         Hash hasher;
+        // The mutex index is determined by the hash of the key modulo the number of stripes.
         return mutexes[hasher(key) % StripeCount];
-    }
-
-    // Lock all mutexes in order to avoid deadlocks
-    void lock_all()
-    {
-        for (auto& mutex : mutexes) {
-            mutex.lock();
-        }
-    }
-
-    // Unlock all mutexes
-    void unlock_all()
-    {
-        for (auto& mutex : mutexes) {
-            mutex.unlock();
-        }
     }
 
 public:
@@ -48,7 +35,7 @@ public:
     // @brief Default constructor
     StripedThreadSafeMap() = default;
 
-    // @brief Constructor with initializer list
+    // @brief Initializer list constructor
     StripedThreadSafeMap(std::initializer_list<value_type> init)
     {
         for (const auto& pair : init) {
@@ -57,38 +44,36 @@ public:
     }
 
     // @brief Insert or update a key-value pair
-    // @param key The key to insert/update
-    // @param value The value to associate with the key
     void insert(const Key& key, const Value& value)
     {
+        // Exclusive (write) lock for the key's stripe
         std::unique_lock<std::shared_mutex> lock(get_mutex_for_key(key));
         data[key] = value;
     }
 
     // @brief Emplace a key-value pair
-    // @param key The key to insert/update
-    // @param args Arguments to construct the value
     template<typename... Args>
     void emplace(const Key& key, Args&&... args)
     {
+        // Exclusive (write) lock
         std::unique_lock<std::shared_mutex> lock(get_mutex_for_key(key));
         data.emplace(key, std::forward<Args>(args)...);
     }
 
-    // @brief Emplace a key-value pair
-    // @param key The key to insert/update
-    // @param args Arguments to construct the value
+    // @brief Try to emplace a key-value pair
     template<typename... Args>
     bool try_emplace(const Key& key, Args&&... args)
     {
+        // Exclusive (write) lock
         std::unique_lock<std::shared_mutex> lock(get_mutex_for_key(key));
         return data.try_emplace(key, std::forward<Args>(args)...).second;
     }
-    // @brief Get value for key with bounds checking
-    // @param key The key to look up
-    // @return Optional containing value if key exists
+
+    // @brief Get value for key with bounds checking (const version)
+    // @return Optional containing the value if the key exists
     std::optional<Value> at(const Key& key) const
     {
+        // Shared (read) lock
         std::shared_lock<std::shared_mutex> lock(get_mutex_for_key(key));
         auto it = data.find(key);
         if (it != data.end())
@@ -98,38 +83,38 @@ public:
         return std::nullopt;
     }
 
-    // @brief Get value for key without bounds checking
-    // @param key The key to look up
+    // @brief Get value for key without bounds checking (non-const version)
     // @return Reference to the value
     // @throws std::out_of_range if key doesn't exist
+    // CRITICAL CORRECTION: Must use unique_lock (exclusive) because returning a non-const
+    // reference allows external code to WRITE to the value, which must be protected.
     Value& at(const Key& key)
     {
-        std::shared_lock<std::shared_mutex> lock(get_mutex_for_key(key));
+        std::unique_lock<std::shared_mutex> lock(get_mutex_for_key(key));
         return data.at(key);
     }
 
     // @brief Check if key exists
-    // @param key The key to check
-    // @return True if key exists
     bool contains(const Key& key) const
     {
+        // Shared (read) lock
         std::shared_lock<std::shared_mutex> lock(get_mutex_for_key(key));
         return data.find(key) != data.end();
     }
 
     // @brief Remove key from map
-    // @param key The key to remove
-    // @return True if key was removed, false if it didn't exist
     bool erase(const Key& key)
     {
+        // Exclusive (write) lock
         std::unique_lock<std::shared_mutex> lock(get_mutex_for_key(key));
         return data.erase(key) > 0;
     }
 
-    // @brief Get size of the map
-    // @return Number of elements in the map
+    // @brief Get the size of the map
+    // Global operation: requires locking all mutexes (read).
     size_type size() const
     {
+        // Sequentially lock all mutexes in the same consistent order (0 to N-1)
         std::vector<std::shared_lock<std::shared_mutex>> locks;
         for (auto& mutex : mutexes)
         {
@@ -138,8 +123,8 @@ public:
         return data.size();
     }
 
-    // @brief Check if map is empty
-    // @return True if map is empty
+    // @brief Check if the map is empty
+    // Global operation: requires locking all mutexes (read).
     bool empty() const
     {
         std::vector<std::shared_lock<std::shared_mutex>> locks;
@@ -151,8 +136,10 @@ public:
     }
 
     // @brief Clear all elements from the map
+    // Global operation: requires locking all mutexes (write).
     void clear()
     {
+        // Exclusive lock on all mutexes.
         std::vector<std::unique_lock<std::shared_mutex>> locks;
         for (auto& mutex : mutexes)
         {
@@ -161,8 +148,8 @@ public:
         data.clear();
     }
 
-    // @brief Apply a function to each key-value pair
-    // @param func Function to apply to each pair
+    // @brief Apply a function to every key-value pair (const version)
+    // Global operation: requires locking all mutexes (read).
     template<typename Func>
     void for_each(Func func) const
     {
@@ -177,8 +164,8 @@ public:
         }
     }
 
-    // @brief Apply a function to each key-value pair (non-const version)
-    // @param func Function to apply to each pair
+    // @brief Apply a function to every key-value pair (non-const version)
+    // Global operation: requires locking all mutexes (write).
     template<typename Func>
     void for_each(Func func)
     {
@@ -193,97 +180,8 @@ public:
         }
     }
 
-    // @brief Find first element satisfying predicate
-    // @param pred Predicate function
-    // @return Optional containing key-value pair if found
-    template<typename Predicate>
-    std::optional<value_type> find_if(Predicate pred) const
-    {
-        std::vector<std::shared_lock<std::shared_mutex>> locks;
-        for (auto& mutex : mutexes)
-        {
-            locks.emplace_back(mutex);
-        }
-        for (const auto& pair : data)
-        {
-            if (pred(pair.first, pair.second))
-            {
-                return pair;
-            }
-        }
-        return std::nullopt;
-    }
-
-    // @brief Count elements satisfying predicate
-    // @param pred Predicate function
-    // @return Number of elements matching the condition
-    template<typename Predicate>
-    size_type count_if(Predicate pred) const
-    {
-        size_type count = 0;
-        std::vector<std::shared_lock<std::shared_mutex>> locks;
-        for (auto& mutex : mutexes)
-        {
-            locks.emplace_back(mutex);
-        }
-        for (const auto& pair : data)
-        {
-            if (pred(pair.first, pair.second))
-            {
-                ++count;
-            }
-        }
-        return count;
-    }
-
-    // @brief Atomically update a value for a key
-    // @param key The key to update
-    // @param update_func Function that takes the current value and returns the new value
-    // @return True if key was found and updated
-    template<typename Func>
-    bool update(const Key& key, Func update_func)
-    {
-        std::unique_lock<std::shared_mutex> lock(get_mutex_for_key(key));
-        auto it = data.find(key);
-        if (it != data.end())
-        {
-            it->second = update_func(it->second);
-            return true;
-        }
-        return false;
-    }
-
-    // @brief Get value or default if key doesn't exist
-    // @param key The key to look up
-    // @param default_value Default value to return if key doesn't exist
-    // @return Value for key or default value
-    Value get_or_default(const Key& key, const Value& default_value) const
-    {
-        std::shared_lock<std::shared_mutex> lock(get_mutex_for_key(key));
-        auto it = data.find(key);
-        if (it != data.end())
-        {
-            return it->second;
-        }
-        return default_value;
-    }
-
-    // @brief Insert if key doesn't exist, otherwise do nothing
-    // @param key The key to insert
-    // @param value The value to insert
-    // @return True if key was inserted, false if it already existed
-    bool insert_if_absent(const Key& key, const Value& value)
-    {
-        std::unique_lock<std::shared_mutex> lock(get_mutex_for_key(key));
-        if (data.find(key) == data.end())
-        {
-            data[key] = value;
-            return true;
-        }
-        return false;
-    }
-
-    // @brief Thread-safe copy of all keys
+    // @brief Enumerate keys
+    // Global operation: requires locking all mutexes (read).
     std::vector<Key> keys() const
     {
         std::vector<Key> result;
@@ -300,7 +198,8 @@ public:
         return result;
     }
 
-    // @brief Thread-safe copy of all values
+    // @brief Enumerate values
+    // Global operation: requires locking all mutexes (read).
     std::vector<Value> values() const
     {
         std::vector<Value> result;
@@ -317,7 +216,8 @@ public:
         return result;
     }
 
-    // @brief Thread-safe copy of all key-value pairs
+    // @brief Enumerate items (key-value pairs)
+    // Global operation: requires locking all mutexes (read).
     std::vector<value_type> items() const
     {
         std::vector<value_type> result;
@@ -334,29 +234,96 @@ public:
         return result;
     }
 
-    // @brief Compute size without locking all stripes (approximate)
-    // @return Approximate size (useful when exact size isn't critical)
+    // @brief Approximate size (potentially non-thread-safe for speed)
     size_type size_approximate() const
     {
-        // This gives an approximate size without full locking
-        // Useful for monitoring purposes when exact size isn't critical
-        return data.size(); // This is technically unsafe but fast
+        // Use with caution in multithreaded scenarios where a completely accurate count is needed.
+        return data.size();
+    }
+
+    // @brief Update a value atomically if key exists
+    template<typename Func>
+    bool update(const Key& key, Func update_func)
+    {
+        // Exclusive (write) lock
+        std::unique_lock<std::shared_mutex> lock(get_mutex_for_key(key));
+        auto it = data.find(key);
+        if (it != data.end())
+        {
+            it->second = update_func(it->second);
+            return true;
+        }
+        return false;
+    }
+
+    // @brief Update a value atomically if key exists
+    template<typename Func>
+    void update_or_insert(const Key& key, Func update_func)
+    {
+        // Exclusive (write) lock
+        std::unique_lock<std::shared_mutex> lock(get_mutex_for_key(key));
+        auto it = data.find(key);
+
+        if (it == data.end()) {
+            // Insere um Value padrão (unordered_set vazio)
+            it = data.emplace(key, Value{}).first;
+        }
+       update_func(it->second);
+    }
+
+    // @brief Get value wrapped in optional
+    std::optional<Value> get(const Key& key) const
+    {
+        // Shared (read) lock
+        std::shared_lock<std::shared_mutex> lock(get_mutex_for_key(key));
+        auto it = data.find(key);
+        if (it != data.end())
+        {
+            return it->second;
+        }
+        return std::nullopt;
+    }
+
+    // @brief Get value or provided default
+    Value get_or_default(const Key& key, const Value& default_value) const
+    {
+        // Shared (read) lock
+        std::shared_lock<std::shared_mutex> lock(get_mutex_for_key(key));
+        auto it = data.find(key);
+        if (it != data.end())
+        {
+            return it->second;
+        }
+        return default_value;
+    }
+
+    // @brief Insert only if key is absent
+    bool insert_if_absent(const Key& key, const Value& value)
+    {
+        // Exclusive (write) lock
+        std::unique_lock<std::shared_mutex> lock(get_mutex_for_key(key));
+        if (data.find(key) == data.end())
+        {
+            data[key] = value;
+            return true;
+        }
+        return false;
     }
 
     // === OPERATORS ===
 
-    // @brief Subscript operator
-    // @param key The key to access
-    // @return Reference to the value (creates default value if key doesn't exist)
+    // @brief Subscript operator (may insert a default value)
     Value& operator[](const Key& key)
     {
+        // Exclusive (write) lock, as it may create a default value if the key doesn't exist.
         std::unique_lock<std::shared_mutex> lock(get_mutex_for_key(key));
         return data[key];
     }
 
-    // Copy constructor
+    // @brief Copy Constructor
     StripedThreadSafeMap(const StripedThreadSafeMap& other)
     {
+        // Lock all of 'other's mutexes (read) before accessing data.
         std::vector<std::shared_lock<std::shared_mutex>> other_locks;
         for (auto& mutex : other.mutexes)
         {
@@ -365,18 +332,22 @@ public:
         data = other.data;
     }
 
-    // Copy assignment operator
+    // @brief Copy Assignment Operator (Deadlock-safe locking for two objects)
     StripedThreadSafeMap& operator=(const StripedThreadSafeMap& other)
     {
         if (this != &other)
         {
+            // Lock all stripes of 'this' (exclusive) and 'other' (shared)
+            // in the same sequential order to prevent cross-object deadlocks.
             std::vector<std::unique_lock<std::shared_mutex>> this_locks;
             std::vector<std::shared_lock<std::shared_mutex>> other_locks;
 
+            // Exclusive lock all stripes of 'this'
             for (auto& mutex : mutexes)
             {
                 this_locks.emplace_back(mutex);
             }
+            // Shared lock all stripes of 'other'
             for (auto& mutex : other.mutexes)
             {
                 other_locks.emplace_back(mutex);
@@ -387,9 +358,10 @@ public:
         return *this;
     }
 
-    // Move constructor
+    // @brief Move Constructor
     StripedThreadSafeMap(StripedThreadSafeMap&& other) noexcept
     {
+        // Lock all of 'other's mutexes (exclusive) to ensure nobody is using it before moving.
         std::vector<std::unique_lock<std::shared_mutex>> other_locks;
         for (auto& mutex : other.mutexes)
         {
@@ -398,18 +370,22 @@ public:
         data = std::move(other.data);
     }
 
-    // Move assignment operator
+    // @brief Move Assignment Operator (Deadlock-safe locking for two objects)
     StripedThreadSafeMap& operator=(StripedThreadSafeMap&& other) noexcept
     {
         if (this != &other)
         {
+            // Lock all stripes of 'this' and 'other' exclusively
+            // in the same sequential order to prevent deadlocks.
             std::vector<std::unique_lock<std::shared_mutex>> this_locks;
             std::vector<std::unique_lock<std::shared_mutex>> other_locks;
 
+            // Exclusive lock all stripes of 'this'
             for (auto& mutex : mutexes)
             {
                 this_locks.emplace_back(mutex);
             }
+            // Exclusive lock all stripes of 'other'
             for (auto& mutex : other.mutexes)
             {
                 other_locks.emplace_back(mutex);

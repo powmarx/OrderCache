@@ -15,8 +15,10 @@ private:
     StripedThreadSafeMap <string, Order> orders_;
 
 	// Indexes for efficient queries
-    StripedThreadSafeMap<string, unordered_set<string>> ordersBySecurity_;
-    StripedThreadSafeMap<string, unordered_set<string>> ordersByUser_;
+    StripedThreadSafeMap<string, unordered_set<string>, hash<string>, 2> ordersBySecurity_;
+    StripedThreadSafeMap<string, unordered_set<string>, hash<string>, 2> ordersByUser_;
+    unordered_set<string>& updateIndexSet(unordered_set<string>& currentSet, const string& orderId, size_t capacity, bool is_insertion);
+
 public:
     void addOrder(Order order) override;
     void cancelOrder(const string& orderId) override;
