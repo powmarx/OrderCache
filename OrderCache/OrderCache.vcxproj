@@ -127,6 +127,7 @@
   <ItemGroup>
     <ClCompile Include="OrderCache.cpp" />
     <ClCompile Include="OrderCacheBenchmark.cpp" />
+    <ClCompile Include="OrderCacheMultithreadTest.cpp" />
     <ClCompile Include="OrderCacheStressTest.cpp" />
     <ClCompile Include="OrderCacheTest.cpp" />
     <ClCompile Include="OrderCacheTestRunner.cpp" />

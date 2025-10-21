@@ -49,6 +49,9 @@ int main() {
         case 5:
             runOverMatchTest();
             break;
+        case 6:
+            runMultithreadTest();
+            break;
         case 40: {
             int numOrders;
             cout << "Enter number of orders for stress test (1-1000000): ";

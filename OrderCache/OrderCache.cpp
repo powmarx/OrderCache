@@ -52,12 +52,12 @@ void OrderCache::addOrder(Order order) {
 
     // 2. Update ordersBySecurity_ index (SAFE and Optimized)
     ordersBySecurity_.update_or_insert(securityId, [&](unordered_set<string>& currentSet) {
-        return insertion_lambda(currentSet, 10000); // Max 10,000 orders per security
+        return insertion_lambda(currentSet, 1000); // Max 10,000 orders per security
         });
 
     // 3. Update ordersByUser_ index (SAFE and Optimized)
     ordersByUser_.update_or_insert(user, [&](unordered_set<string>& currentSet) {
-        return insertion_lambda(currentSet, 5000); // Max 5,000 orders per user
+        return insertion_lambda(currentSet, 500); // Max 5,000 orders per user
         });
 }
 
