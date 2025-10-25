@@ -9,6 +9,8 @@
 #include <vector>
 #include <shared_mutex>
 #include <type_traits>
+#include <algorithm>
+
 
 template<typename Key, typename Value, typename Hash = std::hash<Key>, size_t StripeCount = 16>
 class StripedThreadSafeMap {
@@ -62,6 +64,20 @@ public:
         bucket.data[key] = value;
     }
 
+    // @brief Insert or update a key-value pair
+    void insert_list(const Key& key, const Value& value) {
+        auto& bucket = get_bucket_for_key(key);
+        std::unique_lock lock(bucket.mutex);
+		auto it = bucket.data.find(key);
+        if (it != bucket.data.end()) {
+            it->second.insert(value.begin(), value.end());
+        }
+        else
+        {
+			bucket.data[key] = value;
+        }
+    }
+
     // @brief Emplace a key-value pair
     template<typename... Args>
     void emplace(const Key& key, Args&&... args) {
@@ -72,11 +88,23 @@ public:
 
     // @brief Try to emplace a key-value pair
     template<typename... Args>
-    bool try_emplace(const Key& key, Args&&... args) {
+    auto try_emplace(const Key& key, Args&&... args) {
         auto& bucket = get_bucket_for_key(key);
         std::unique_lock lock(bucket.mutex);
-        return bucket.data.try_emplace(key, std::forward<Args>(args)...).second;
+        return bucket.data.try_emplace(key, std::forward<Args>(args)...);
     }
+    // @brief Try to emplace a key-value pair
+  //  template<typename... Args>
+  //  bool try_emplace(int capacity=1000, float load_factor=0.7F, const Key& key="", Args&&... args) {
+  //      auto& bucket = get_bucket_for_key(key);
+  //      std::unique_lock lock(bucket.mutex);
+		//
+  //      if(bucket.data.empty()){
+  //          bucket.data.reserve(capacity);
+  //          bucket.data.max_load_factor(load_factor);
+		//}
+  //      return bucket.data.try_mplace(key, std::forward<Args>(args)...).second;
+  //  }
 
     // @brief Get value for key with bounds checking (const version)
     std::optional<Value> at(const Key& key) const {
@@ -85,8 +113,18 @@ public:
         auto it = bucket.data.find(key);
         return it != bucket.data.end() ? std::optional<Value>(it->second) : std::nullopt;
     }
+	// @brief Get value for key with bounds checking (non-const version)
+    
+    Value* at(const Key& key) {
+        auto& bucket = get_bucket_for_key(key);
+        std::shared_lock lock(bucket.mutex);
 
-    // @brief Check if key exists
+        auto it = bucket.data.find(key);
+
+        // Returns a pointer to the value stored in the map's internal bucket. Safe.
+        return it != bucket.data.end() ? &(it->second) : nullptr;
+    }   
+    // @brief Check if key existsb
     bool contains(const Key& key) const {
         auto& bucket = get_bucket_for_key(key);
         std::shared_lock lock(bucket.mutex);

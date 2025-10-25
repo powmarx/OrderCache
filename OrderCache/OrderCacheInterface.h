@@ -22,12 +22,12 @@ public:
 private:
     // use the below to hold the order data
     // do not remove these member variables
-    std::string m_orderId;     // unique order id
-    std::string m_securityId;  // security identifier
-    std::string m_side;        // side of the order, eg Buy or Sell
-    unsigned int m_qty;        // qty for this order
-    std::string m_user;        // user name who owns this order
-    std::string m_company;     // company for user
+    std::string m_orderId    = "";  // unique order id
+    std::string m_securityId = "";  // security identifier
+    std::string m_side       = "";  // side of the order, eg Buy or Sell
+    unsigned int m_qty       = 0;   // qty for this order
+    std::string m_user       = "";  // user name who owns this order
+    std::string m_company    = "";  // company for user
 };
 
 class OrderCacheInterface {
