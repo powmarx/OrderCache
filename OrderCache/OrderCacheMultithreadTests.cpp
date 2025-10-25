@@ -109,7 +109,7 @@ void runMultithreadingTests() {
         // Add orders
         for (int i = 0; i < numThreads / 2; i++) {
             threads.emplace_back([&, i]() {
-                for (int j = 0; j < 50; j++) {
+                for (int j = 0; j < 500; j++) {
                     string orderId = "Add_Ord_" + to_string(i) + "_" + to_string(j);
                     try {
                         cache.addOrder(Order(orderId, "SecId2", "Sell", 200, "User" + to_string(i), "Company2"));
@@ -126,7 +126,7 @@ void runMultithreadingTests() {
         // Cancel orders
         for (int i = 0; i < numThreads / 2; i++) {
             threads.emplace_back([&, i]() {
-                for (int j = 0; j < 50; j++) {
+                for (int j = 0; j < 500; j++) {
                     string orderId = "PreOrd_" + to_string((i * 10 + j) % 100);
                     try {
                         cache.cancelOrder(orderId);
@@ -157,7 +157,7 @@ void runMultithreadingTests() {
 
         // Should have initial 100 + added orders - canceled orders
         // Since we're adding 150 and canceling up to 100, result should be between 150 and 250
-        assert(orders.size() >= 150 -addFailure && orders.size() <= 250 && "Order count should be in expected range");
+        assert(orders.size() >= 1500 -addFailure && orders.size() <= 1650 && "Order count should be in expected range");
         cout << "Test 2 Passed!\n";
     }
 

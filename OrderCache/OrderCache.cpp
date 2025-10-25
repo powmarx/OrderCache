@@ -25,17 +25,17 @@ void OrderCache::cancelOrder(const string& orderId) {
         throw out_of_range("Order ID not found: " + orderId);
     }
 
-    const auto order = orders_.at(orderId);
-    const string& securityId = order->securityId();
-    const string& user = order->user();
+    const auto order = *orders_.at(orderId);
+    const string& securityId = order.securityId();
+    const string& user = order.user();
 
     // Optimize security index removal O(1)
     if (ordersBySecurity_.contains(securityId)) {
-        auto secOrders = ordersBySecurity_.at(securityId);
+        auto secOrders = *ordersBySecurity_.at(securityId);
         // Use unordered_set for O(1) removal
-        secOrders->erase(orderId);
+        secOrders.erase(orderId);
 		// For efficiency, only erase the map entry if the set is empty
-        if (secOrders->empty()) {
+        if (secOrders.empty()) {
             ordersBySecurity_.erase(securityId);
         }
     }
@@ -92,7 +92,7 @@ unsigned int OrderCache::getMatchingSizeForSecurity(const string& securityId) {
         return 0;
     }
 
-	const auto orderIds = *ordersBySecurity_.at(securityId);
+	const auto orderIds = ordersBySecurity_[securityId];
 
     unordered_map<string, unsigned int> buyQtyPerCompany;
     unordered_map<string, unsigned int> sellQtyPerCompany;
