@@ -9,21 +9,22 @@ void OrderCache::addOrder(Order order) {
     const string& orderId = order.orderId();
     const string& securityId = order.securityId();
     const string& user = order.user();// Add to main storage
-    
-    if (!(orders_.try_emplace(orderId, order))) {
+
+    if ((orders_.contains(orderId))) {
 		throw invalid_argument("Duplicate Order ID: " + orderId);
-    }; // O(1) average case
+    }
+    else {
+        orders_.insert(orderId, order); // O(1) average case
+	}
 
     // Update indexes with collision mitigation
     auto& secSet = ordersBySecurity_[securityId];
     if (secSet.empty()) secSet.reserve(10000); // Preallocate for ~10,000 orders
     secSet.max_load_factor(0.7F); // Reduce collisions
-    secSet.insert(orderId); // O(1) average case
 
     auto& userSet = ordersByUser_[user];
     if (userSet.empty()) userSet.reserve(5000); // Preallocate for ~10,000 orders
     userSet.max_load_factor(0.7F); // Reduce collisions
-    userSet.insert(orderId); // O(1) average case
 }
 
 void OrderCache::cancelOrder(const string& orderId) {
@@ -32,13 +33,15 @@ void OrderCache::cancelOrder(const string& orderId) {
         throw out_of_range("Order ID not found: " + orderId);
     }
 
-    const Order& order = orders_.at(orderId);
+    const auto order_get = orders_.at(orderId);
+	const Order& order = order_get.value();
     const string& securityId = order.securityId();
     const string& user = order.user();
 
     // Optimize security index removal O(1)
     if (ordersBySecurity_.contains(securityId)) {
-        auto& secOrders = ordersBySecurity_[securityId];
+        auto secOrders_ = ordersBySecurity_.at(securityId);
+		auto& secOrders = secOrders_.value();
         // Use unordered_set for O(1) removal
         secOrders.erase(orderId);
 		// For efficiency, only erase the map entry if the set is empty
@@ -49,7 +52,8 @@ void OrderCache::cancelOrder(const string& orderId) {
 
     // Optimize user index removal
     if (ordersByUser_.contains(user)) {
-        auto& userOrders = ordersByUser_[user];
+		auto userOrders_ = ordersByUser_.at(user);
+        auto& userOrders = userOrders_.value();
         userOrders.erase(orderId);
         if (userOrders.empty()) {
             ordersByUser_.erase(user);
@@ -99,7 +103,7 @@ unsigned int OrderCache::getMatchingSizeForSecurity(const string& securityId) {
         return 0;
     }
 
-	const auto& orderIds = ordersBySecurity_[securityId];
+	const auto orderIds = ordersBySecurity_[securityId];
 
     unordered_map<string, unsigned int> buyQtyPerCompany;
     unordered_map<string, unsigned int> sellQtyPerCompany;

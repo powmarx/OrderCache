@@ -16,6 +16,7 @@ int main() {
         cout << "3. Run Example 3 Tests\n";
         cout << "4. Run Example 4 Tests (only 1 company)\n";
         cout << "5. Run Overmatch Tests\n";
+        cout << "6. Run Multithread Tests\n";
         cout << "40. Run Stress Test\n";
         cout << "50. Run Performance Benchmarks\n";
         cout << "99. Exit\n";
@@ -48,6 +49,9 @@ int main() {
             break;
         case 5:
             runOverMatchTest();
+            break;
+        case 6:
+            runMultithreadingTests();
             break;
         case 40: {
             int numOrders;

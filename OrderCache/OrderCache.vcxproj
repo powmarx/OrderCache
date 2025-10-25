@@ -118,6 +118,7 @@
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
+      <ExceptionHandling>Async</ExceptionHandling>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -127,6 +128,7 @@
   <ItemGroup>
     <ClCompile Include="OrderCache.cpp" />
     <ClCompile Include="OrderCacheBenchmark.cpp" />
+    <ClCompile Include="OrderCacheMultithreadTests.cpp" />
     <ClCompile Include="OrderCacheStressTest.cpp" />
     <ClCompile Include="OrderCacheTest.cpp" />
     <ClCompile Include="OrderCacheTestRunner.cpp" />

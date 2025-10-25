@@ -1,5 +1,5 @@
-#ifndef _STRIPED_THREAD_SAFE_MAP_H_
-#define _STRIPED_THREAD_SAFE_MAP_H_
+#ifndef STRIPED_THREAD_SAFE_MAP_H_
+#define STRIPED_THREAD_SAFE_MAP_H_
 
 #include <unordered_map>
 #include <mutex>
@@ -8,34 +8,34 @@
 #include <functional>
 #include <vector>
 #include <shared_mutex>
+#include <type_traits>
 
 template<typename Key, typename Value, typename Hash = std::hash<Key>, size_t StripeCount = 16>
-class StripedThreadSafeMap
-{
+class StripedThreadSafeMap {
 private:
-    std::unordered_map<Key, Value, Hash> data;
-    mutable std::array<std::shared_mutex, StripeCount> mutexes;
+    struct StripedBucket {
+        std::unordered_map<Key, Value, Hash> data;
+        mutable std::shared_mutex mutex;
+    };
+    
+    std::array<StripedBucket, StripeCount> buckets;
 
-    // Helper function to get the mutex for a specific key
-    std::shared_mutex& get_mutex_for_key(const Key& key) const
-    {
+    // Improved hash distribution with bounds checking
+    StripedBucket& get_bucket_for_key(const Key& key) const {
         Hash hasher;
-        return mutexes[hasher(key) % StripeCount];
+        size_t index = hasher(key) % StripeCount;
+        return const_cast<StripedBucket&>(buckets[index]);
     }
 
-    // Lock all mutexes in order to avoid deadlocks
-    void lock_all()
-    {
-        for (auto& mutex : mutexes) {
-            mutex.lock();
+    void lock_all() {
+        for (auto& bucket : buckets) {
+            bucket.mutex.lock();
         }
     }
 
-    // Unlock all mutexes
-    void unlock_all()
-    {
-        for (auto& mutex : mutexes) {
-            mutex.unlock();
+    void unlock_all() {
+        for (auto& bucket : buckets) {
+            bucket.mutex.unlock();
         }
     }
 
@@ -49,204 +49,171 @@ public:
     StripedThreadSafeMap() = default;
 
     // @brief Constructor with initializer list
-    StripedThreadSafeMap(std::initializer_list<value_type> init)
-    {
+    StripedThreadSafeMap(std::initializer_list<value_type> init) {
         for (const auto& pair : init) {
             insert(pair.first, pair.second);
         }
     }
 
     // @brief Insert or update a key-value pair
-    // @param key The key to insert/update
-    // @param value The value to associate with the key
-    void insert(const Key& key, const Value& value)
-    {
-        std::unique_lock<std::shared_mutex> lock(get_mutex_for_key(key));
-        data[key] = value;
+    void insert(const Key& key, const Value& value) {
+        auto& bucket = get_bucket_for_key(key);
+        std::unique_lock lock(bucket.mutex);
+        bucket.data[key] = value;
     }
 
     // @brief Emplace a key-value pair
-    // @param key The key to insert/update
-    // @param args Arguments to construct the value
     template<typename... Args>
-    void emplace(const Key& key, Args&&... args)
-    {
-        std::unique_lock<std::shared_mutex> lock(get_mutex_for_key(key));
-        data.emplace(key, std::forward<Args>(args)...);
+    void emplace(const Key& key, Args&&... args) {
+        auto& bucket = get_bucket_for_key(key);
+        std::unique_lock lock(bucket.mutex);
+        bucket.data.emplace(key, std::forward<Args>(args)...);
     }
 
-    // @brief Emplace a key-value pair
-    // @param key The key to insert/update
-    // @param args Arguments to construct the value
+    // @brief Try to emplace a key-value pair
     template<typename... Args>
-    bool try_emplace(const Key& key, Args&&... args)
-    {
-        std::unique_lock<std::shared_mutex> lock(get_mutex_for_key(key));
-        return data.try_emplace(key, std::forward<Args>(args)...).second;
-    }
-    // @brief Get value for key with bounds checking
-    // @param key The key to look up
-    // @return Optional containing value if key exists
-    std::optional<Value> at(const Key& key) const
-    {
-        std::shared_lock<std::shared_mutex> lock(get_mutex_for_key(key));
-        auto it = data.find(key);
-        if (it != data.end())
-        {
-            return it->second;
-        }
-        return std::nullopt;
+    bool try_emplace(const Key& key, Args&&... args) {
+        auto& bucket = get_bucket_for_key(key);
+        std::unique_lock lock(bucket.mutex);
+        return bucket.data.try_emplace(key, std::forward<Args>(args)...).second;
     }
 
-    // @brief Get value for key without bounds checking
-    // @param key The key to look up
-    // @return Reference to the value
-    // @throws std::out_of_range if key doesn't exist
-    Value& at(const Key& key)
-    {
-        std::shared_lock<std::shared_mutex> lock(get_mutex_for_key(key));
-        return data.at(key);
+    // @brief Get value for key with bounds checking (const version)
+    std::optional<Value> at(const Key& key) const {
+        auto& bucket = get_bucket_for_key(key);
+        std::shared_lock lock(bucket.mutex);
+        auto it = bucket.data.find(key);
+        return it != bucket.data.end() ? std::optional<Value>(it->second) : std::nullopt;
     }
 
     // @brief Check if key exists
-    // @param key The key to check
-    // @return True if key exists
-    bool contains(const Key& key) const
-    {
-        std::shared_lock<std::shared_mutex> lock(get_mutex_for_key(key));
-        return data.find(key) != data.end();
+    bool contains(const Key& key) const {
+        auto& bucket = get_bucket_for_key(key);
+        std::shared_lock lock(bucket.mutex);
+        return bucket.data.find(key) != bucket.data.end();
     }
 
     // @brief Remove key from map
-    // @param key The key to remove
-    // @return True if key was removed, false if it didn't exist
-    bool erase(const Key& key)
-    {
-        std::unique_lock<std::shared_mutex> lock(get_mutex_for_key(key));
-        return data.erase(key) > 0;
+    bool erase(const Key& key) {
+        auto& bucket = get_bucket_for_key(key);
+        std::unique_lock lock(bucket.mutex);
+        return bucket.data.erase(key) > 0;
     }
 
     // @brief Get size of the map
-    // @return Number of elements in the map
-    size_type size() const
-    {
+    size_type size() const {
+        size_type total_size = 0;
         std::vector<std::shared_lock<std::shared_mutex>> locks;
-        for (auto& mutex : mutexes)
-        {
-            locks.emplace_back(mutex);
+        locks.reserve(StripeCount);
+        
+        for (auto& bucket : buckets) {
+            locks.emplace_back(bucket.mutex);
+            total_size += bucket.data.size();
         }
-        return data.size();
+        return total_size;
     }
 
     // @brief Check if map is empty
-    // @return True if map is empty
-    bool empty() const
-    {
+    bool empty() const {
         std::vector<std::shared_lock<std::shared_mutex>> locks;
-        for (auto& mutex : mutexes)
-        {
-            locks.emplace_back(mutex);
+        locks.reserve(StripeCount);
+        
+        for (auto& bucket : buckets) {
+            locks.emplace_back(bucket.mutex);
+            if (!bucket.data.empty()) {
+                return false;
+            }
         }
-        return data.empty();
+        return true;
     }
 
     // @brief Clear all elements from the map
-    void clear()
-    {
+    void clear() {
         std::vector<std::unique_lock<std::shared_mutex>> locks;
-        for (auto& mutex : mutexes)
-        {
-            locks.emplace_back(mutex);
+        locks.reserve(StripeCount);
+        
+        for (auto& bucket : buckets) {
+            locks.emplace_back(bucket.mutex);
+            bucket.data.clear();
         }
-        data.clear();
     }
 
-    // @brief Apply a function to each key-value pair
-    // @param func Function to apply to each pair
+    // @brief Apply a function to each key-value pair (const version)
     template<typename Func>
-    void for_each(Func func) const
-    {
+    void for_each(Func func) const {
         std::vector<std::shared_lock<std::shared_mutex>> locks;
-        for (auto& mutex : mutexes)
-        {
-            locks.emplace_back(mutex);
+        locks.reserve(StripeCount);
+        
+        for (auto& bucket : buckets) {
+            locks.emplace_back(bucket.mutex);
         }
-        for (const auto& pair : data)
-        {
-            func(pair.first, pair.second);
+        
+        for (auto& bucket : buckets) {
+            for (const auto& pair : bucket.data) {
+                func(pair.first, pair.second);
+            }
         }
     }
 
     // @brief Apply a function to each key-value pair (non-const version)
-    // @param func Function to apply to each pair
     template<typename Func>
-    void for_each(Func func)
-    {
+    void for_each(Func func) {
         std::vector<std::unique_lock<std::shared_mutex>> locks;
-        for (auto& mutex : mutexes)
-        {
-            locks.emplace_back(mutex);
+        locks.reserve(StripeCount);
+        
+        for (auto& bucket : buckets) {
+            locks.emplace_back(bucket.mutex);
         }
-        for (auto& pair : data)
-        {
-            func(pair.first, pair.second);
+        
+        for (auto& bucket : buckets) {
+            for (auto& pair : bucket.data) {
+                func(pair.first, pair.second);
+            }
         }
     }
 
     // @brief Find first element satisfying predicate
-    // @param pred Predicate function
-    // @return Optional containing key-value pair if found
     template<typename Predicate>
-    std::optional<value_type> find_if(Predicate pred) const
-    {
+    std::optional<value_type> find_if(Predicate pred) const {
         std::vector<std::shared_lock<std::shared_mutex>> locks;
-        for (auto& mutex : mutexes)
-        {
-            locks.emplace_back(mutex);
-        }
-        for (const auto& pair : data)
-        {
-            if (pred(pair.first, pair.second))
-            {
-                return pair;
+        locks.reserve(StripeCount);
+        
+        for (auto& bucket : buckets) {
+            locks.emplace_back(bucket.mutex);
+            for (const auto& pair : bucket.data) {
+                if (pred(pair.first, pair.second)) {
+                    return pair;
+                }
             }
         }
         return std::nullopt;
     }
 
     // @brief Count elements satisfying predicate
-    // @param pred Predicate function
-    // @return Number of elements matching the condition
     template<typename Predicate>
-    size_type count_if(Predicate pred) const
-    {
+    size_type count_if(Predicate pred) const {
         size_type count = 0;
         std::vector<std::shared_lock<std::shared_mutex>> locks;
-        for (auto& mutex : mutexes)
-        {
-            locks.emplace_back(mutex);
-        }
-        for (const auto& pair : data)
-        {
-            if (pred(pair.first, pair.second))
-            {
-                ++count;
+        locks.reserve(StripeCount);
+        
+        for (auto& bucket : buckets) {
+            locks.emplace_back(bucket.mutex);
+            for (const auto& pair : bucket.data) {
+                if (pred(pair.first, pair.second)) {
+                    ++count;
+                }
             }
         }
         return count;
     }
 
     // @brief Atomically update a value for a key
-    // @param key The key to update
-    // @param update_func Function that takes the current value and returns the new value
-    // @return True if key was found and updated
     template<typename Func>
-    bool update(const Key& key, Func update_func)
-    {
-        std::unique_lock<std::shared_mutex> lock(get_mutex_for_key(key));
-        auto it = data.find(key);
-        if (it != data.end())
-        {
+    bool update(const Key& key, Func update_func) {
+        auto& bucket = get_bucket_for_key(key);
+        std::unique_lock lock(bucket.mutex);
+        auto it = bucket.data.find(key);
+        if (it != bucket.data.end()) {
             it->second = update_func(it->second);
             return true;
         }
@@ -254,171 +221,203 @@ public:
     }
 
     // @brief Get value or default if key doesn't exist
-    // @param key The key to look up
-    // @param default_value Default value to return if key doesn't exist
-    // @return Value for key or default value
-    Value get_or_default(const Key& key, const Value& default_value) const
-    {
-        std::shared_lock<std::shared_mutex> lock(get_mutex_for_key(key));
-        auto it = data.find(key);
-        if (it != data.end())
-        {
-            return it->second;
-        }
-        return default_value;
+    Value get_or_default(const Key& key, const Value& default_value) const {
+        auto& bucket = get_bucket_for_key(key);
+        std::shared_lock lock(bucket.mutex);
+        auto it = bucket.data.find(key);
+        return it != bucket.data.end() ? it->second : default_value;
     }
 
     // @brief Insert if key doesn't exist, otherwise do nothing
-    // @param key The key to insert
-    // @param value The value to insert
-    // @return True if key was inserted, false if it already existed
-    bool insert_if_absent(const Key& key, const Value& value)
-    {
-        std::unique_lock<std::shared_mutex> lock(get_mutex_for_key(key));
-        if (data.find(key) == data.end())
-        {
-            data[key] = value;
+    bool insert_if_absent(const Key& key, const Value& value) {
+        auto& bucket = get_bucket_for_key(key);
+        std::unique_lock lock(bucket.mutex);
+        if (bucket.data.find(key) == bucket.data.end()) {
+            bucket.data[key] = value;
             return true;
         }
         return false;
     }
 
     // @brief Thread-safe copy of all keys
-    std::vector<Key> keys() const
-    {
+    std::vector<Key> keys() const {
         std::vector<Key> result;
         std::vector<std::shared_lock<std::shared_mutex>> locks;
-        for (auto& mutex : mutexes)
-        {
-            locks.emplace_back(mutex);
+        locks.reserve(StripeCount);
+        
+        // First pass: count total elements for reservation
+        size_type total_size = 0;
+        for (auto& bucket : buckets) {
+            locks.emplace_back(bucket.mutex);
+            total_size += bucket.data.size();
         }
-        result.reserve(data.size());
-        for (const auto& pair : data)
-        {
-            result.push_back(pair.first);
+        
+        result.reserve(total_size);
+        for (auto& bucket : buckets) {
+            for (const auto& pair : bucket.data) {
+                result.push_back(pair.first);
+            }
         }
         return result;
     }
 
     // @brief Thread-safe copy of all values
-    std::vector<Value> values() const
-    {
+    std::vector<Value> values() const {
         std::vector<Value> result;
         std::vector<std::shared_lock<std::shared_mutex>> locks;
-        for (auto& mutex : mutexes)
-        {
-            locks.emplace_back(mutex);
+        locks.reserve(StripeCount);
+        
+        size_type total_size = 0;
+        for (auto& bucket : buckets) {
+            locks.emplace_back(bucket.mutex);
+            total_size += bucket.data.size();
         }
-        result.reserve(data.size());
-        for (const auto& pair : data)
-        {
-            result.push_back(pair.second);
+        
+        result.reserve(total_size);
+        for (auto& bucket : buckets) {
+            for (const auto& pair : bucket.data) {
+                result.push_back(pair.second);
+            }
         }
         return result;
     }
 
     // @brief Thread-safe copy of all key-value pairs
-    std::vector<value_type> items() const
-    {
+    std::vector<value_type> items() const {
         std::vector<value_type> result;
         std::vector<std::shared_lock<std::shared_mutex>> locks;
-        for (auto& mutex : mutexes)
-        {
-            locks.emplace_back(mutex);
+        locks.reserve(StripeCount);
+        
+        size_type total_size = 0;
+        for (auto& bucket : buckets) {
+            locks.emplace_back(bucket.mutex);
+            total_size += bucket.data.size();
         }
-        result.reserve(data.size());
-        for (const auto& pair : data)
-        {
-            result.push_back(pair);
+        
+        result.reserve(total_size);
+        for (auto& bucket : buckets) {
+            for (const auto& pair : bucket.data) {
+                result.push_back(pair);
+            }
         }
         return result;
     }
 
     // @brief Compute size without locking all stripes (approximate)
-    // @return Approximate size (useful when exact size isn't critical)
-    size_type size_approximate() const
-    {
-        // This gives an approximate size without full locking
-        // Useful for monitoring purposes when exact size isn't critical
-        return data.size(); // This is technically unsafe but fast
+    size_type size_approximate() const {
+        size_type total_size = 0;
+        for (auto& bucket : buckets) {
+            // Try to get shared lock without blocking
+            if (bucket.mutex.try_lock_shared()) {
+                total_size += bucket.data.size();
+                bucket.mutex.unlock_shared();
+            } else {
+                // If we can't lock, use the last known size (this is why it's approximate)
+                total_size += bucket.data.size();
+            }
+        }
+        return total_size;
     }
 
     // === OPERATORS ===
 
     // @brief Subscript operator
-    // @param key The key to access
-    // @return Reference to the value (creates default value if key doesn't exist)
-    Value& operator[](const Key& key)
-    {
-        std::unique_lock<std::shared_mutex> lock(get_mutex_for_key(key));
-        return data[key];
+    Value& operator[](const Key& key) {
+        auto& bucket = get_bucket_for_key(key);
+        std::unique_lock lock(bucket.mutex);
+        return bucket.data[key];
     }
 
     // Copy constructor
-    StripedThreadSafeMap(const StripedThreadSafeMap& other)
-    {
+    StripedThreadSafeMap(const StripedThreadSafeMap& other) {
         std::vector<std::shared_lock<std::shared_mutex>> other_locks;
-        for (auto& mutex : other.mutexes)
-        {
-            other_locks.emplace_back(mutex);
+        other_locks.reserve(StripeCount);
+        
+        for (auto& bucket : other.buckets) {
+            other_locks.emplace_back(bucket.mutex);
         }
-        data = other.data;
+        
+        for (size_t i = 0; i < StripeCount; ++i) {
+            buckets[i].data = other.buckets[i].data;
+        }
     }
 
     // Copy assignment operator
-    StripedThreadSafeMap& operator=(const StripedThreadSafeMap& other)
-    {
-        if (this != &other)
-        {
+    StripedThreadSafeMap& operator=(const StripedThreadSafeMap& other) {
+        if (this != &other) {
             std::vector<std::unique_lock<std::shared_mutex>> this_locks;
             std::vector<std::shared_lock<std::shared_mutex>> other_locks;
+            this_locks.reserve(StripeCount);
+            other_locks.reserve(StripeCount);
 
-            for (auto& mutex : mutexes)
-            {
-                this_locks.emplace_back(mutex);
+            for (auto& bucket : buckets) {
+                this_locks.emplace_back(bucket.mutex);
             }
-            for (auto& mutex : other.mutexes)
-            {
-                other_locks.emplace_back(mutex);
+            for (auto& bucket : other.buckets) {
+                other_locks.emplace_back(bucket.mutex);
             }
 
-            data = other.data;
+            for (size_t i = 0; i < StripeCount; ++i) {
+                buckets[i].data = other.buckets[i].data;
+            }
         }
         return *this;
     }
 
     // Move constructor
-    StripedThreadSafeMap(StripedThreadSafeMap&& other) noexcept
-    {
+    StripedThreadSafeMap(StripedThreadSafeMap&& other) noexcept {
         std::vector<std::unique_lock<std::shared_mutex>> other_locks;
-        for (auto& mutex : other.mutexes)
-        {
-            other_locks.emplace_back(mutex);
+        other_locks.reserve(StripeCount);
+        
+        for (auto& bucket : other.buckets) {
+            other_locks.emplace_back(bucket.mutex);
         }
-        data = std::move(other.data);
+        
+        for (size_t i = 0; i < StripeCount; ++i) {
+            buckets[i].data = std::move(other.buckets[i].data);
+        }
     }
 
     // Move assignment operator
-    StripedThreadSafeMap& operator=(StripedThreadSafeMap&& other) noexcept
-    {
-        if (this != &other)
-        {
+    StripedThreadSafeMap& operator=(StripedThreadSafeMap&& other) noexcept {
+        if (this != &other) {
             std::vector<std::unique_lock<std::shared_mutex>> this_locks;
             std::vector<std::unique_lock<std::shared_mutex>> other_locks;
+            this_locks.reserve(StripeCount);
+            other_locks.reserve(StripeCount);
 
-            for (auto& mutex : mutexes)
-            {
-                this_locks.emplace_back(mutex);
+            for (auto& bucket : buckets) {
+                this_locks.emplace_back(bucket.mutex);
             }
-            for (auto& mutex : other.mutexes)
-            {
-                other_locks.emplace_back(mutex);
+            for (auto& bucket : other.buckets) {
+                other_locks.emplace_back(bucket.mutex);
             }
 
-            data = std::move(other.data);
+            for (size_t i = 0; i < StripeCount; ++i) {
+                buckets[i].data = std::move(other.buckets[i].data);
+            }
         }
         return *this;
     }
+
+    // @brief Get the current stripe count (useful for monitoring)
+    constexpr size_t get_stripe_count() const noexcept {
+        return StripeCount;
+    }
+
+    // @brief Get statistics about bucket distribution (useful for tuning)
+    std::vector<size_type> get_bucket_sizes() const {
+        std::vector<size_type> sizes;
+        sizes.reserve(StripeCount);
+        std::vector<std::shared_lock<std::shared_mutex>> locks;
+        locks.reserve(StripeCount);
+        
+        for (auto& bucket : buckets) {
+            locks.emplace_back(bucket.mutex);
+            sizes.push_back(bucket.data.size());
+        }
+        return sizes;
+    }
 };
 
-#endif // _STRIPED_THREAD_SAFE_MAP_H_
+#endif // STRIPED_THREAD_SAFE_MAP_H_
