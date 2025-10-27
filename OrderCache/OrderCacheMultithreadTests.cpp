@@ -18,7 +18,7 @@ void runMultithreadingTests() {
     {
         OrderCache cache;
         const int numThreads = 8;
-        const int ordersPerThread = 100;
+        const int ordersPerThread = 1000;
         vector<thread> threads;
         atomic<int> totalOrdersAdded(0);
         atomic<int> successfulQueries(0);
@@ -79,6 +79,11 @@ void runMultithreadingTests() {
 
         // Verify results
         auto orders = cache.getAllOrders();
+        for(auto& order : orders) {
+           if(order.orderId().empty()) {
+               cout << "Found order with empty ID!\n";
+		   }
+		}
         cout << "Added " << totalOrdersAdded << " orders, found " << orders.size() << " orders\n";
         cout << "Successful queries: " << successfulQueries << "\n";
         cout << "Execution time: " << duration.count() << "ms\n";

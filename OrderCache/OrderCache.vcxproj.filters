@@ -33,6 +33,9 @@
     <ClCompile Include="OrderCacheMultithreadTests.cpp">
       <Filter>Arquivos de Origem</Filter>
     </ClCompile>
+    <ClCompile Include="OrderCacheMultithreadBenchmark..cpp">
+      <Filter>Arquivos de Origem</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="OrderCacheInterface.h">

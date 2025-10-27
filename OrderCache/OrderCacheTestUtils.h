@@ -8,5 +8,6 @@ void runOverMatchTest();
 void runStressTest(unsigned int numOrders);
 void runBenchmark(unsigned int numOrders);
 void runMultithreadingTests();
+void runSafeMultithreadedBenchmark();
 
 using namespace std;

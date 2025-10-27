@@ -31,7 +31,7 @@ void OrderCache::cancelOrder(const string& orderId) {
 
     // Optimize security index removal O(1)
     if (ordersBySecurity_.contains(securityId)) {
-        auto secOrders = *ordersBySecurity_.at(securityId);
+        auto &secOrders = *ordersBySecurity_.at(securityId);
         // Use unordered_set for O(1) removal
         secOrders.erase(orderId);
 		// For efficiency, only erase the map entry if the set is empty
@@ -42,9 +42,9 @@ void OrderCache::cancelOrder(const string& orderId) {
 
     // Optimize user index removal
     if (ordersByUser_.contains(user)) {
-		auto userOrders = ordersByUser_.at(user);
-        userOrders->erase(orderId);
-        if (userOrders->empty()) {
+		auto &userOrders = *ordersByUser_.at(user);
+        userOrders.erase(orderId);
+        if (userOrders.empty()) {
             ordersByUser_.erase(user);
         }
     }
@@ -77,7 +77,7 @@ void OrderCache::cancelOrdersForSecIdWithMinimumQty(const string& securityId, un
 
     for (const string& orderId : orderIds) {
         if (orders_.contains(orderId)) {
-			const auto& order = orders_[orderId];
+			const auto& order = orders_.at_const(orderId).value();
             if (order.qty() >= minQty) {
 
                 cancelOrder(orderId); // Reuse existing method for consistency and safety
@@ -87,12 +87,12 @@ void OrderCache::cancelOrdersForSecIdWithMinimumQty(const string& securityId, un
 }
 
 unsigned int OrderCache::getMatchingSizeForSecurity(const string& securityId) {
-	if (!ordersBySecurity_.contains(securityId) ){
-		// Could be an error code or -1 for not found, but no specs about it
+    if (!ordersBySecurity_.contains(securityId)) {
+        // Could be an error code or -1 for not found, but no specs about it
         return 0;
     }
 
-	const auto orderIds = ordersBySecurity_[securityId];
+    const auto orderIds = ordersBySecurity_.at_const(securityId).value();
 
     unordered_map<string, unsigned int> buyQtyPerCompany;
     unordered_map<string, unsigned int> sellQtyPerCompany;

@@ -3,6 +3,8 @@
 #include <string>
 #include <limits>
 
+class OrderCacheMultithreadBenchmark;
+
 void clearInputBuffer() {
     cin.clear();
     cin.ignore(numeric_limits<streamsize>::max(), '\n');
@@ -19,6 +21,7 @@ int main() {
         cout << "6. Run Multithread Tests\n";
         cout << "40. Run Stress Test\n";
         cout << "50. Run Performance Benchmarks\n";
+		cout << "60. Run Multithread Benchmark\n";
         cout << "99. Exit\n";
         cout << "Enter your choice (1-99): ";
 
@@ -53,6 +56,10 @@ int main() {
         case 6:
             runMultithreadingTests();
             break;
+        case 60:
+        {
+            runSafeMultithreadedBenchmark();
+        }
         case 40: {
             int numOrders;
             cout << "Enter number of orders for stress test (1-1000000): ";

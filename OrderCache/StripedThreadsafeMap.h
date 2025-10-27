@@ -97,7 +97,7 @@ public:
     }
 
     // @brief Get value for key with bounds checking (const version)
-    std::optional<Value> at(const Key& key) const {
+    std::optional<Value> at_const(const Key& key) const {
         auto& bucket = get_bucket_for_key(key);
         std::shared_lock lock(bucket.mutex);
         auto it = bucket.data.find(key);
