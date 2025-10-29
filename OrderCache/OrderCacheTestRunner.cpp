@@ -59,6 +59,7 @@ int main() {
         case 60:
         {
             runSafeMultithreadedBenchmark();
+            break;
         }
         case 40: {
             int numOrders;

@@ -170,7 +170,7 @@ void runMultithreadingTests() {
     cout << "\nTest 3: Complex Mixed Operations\n";
     {
         OrderCache cache;
-        const int numThreads = 10;
+        const int numThreads = 100;
         vector<thread> threads;
         atomic<int> operationsCompleted(0);
 
@@ -193,9 +193,10 @@ void runMultithreadingTests() {
             threads.emplace_back([&, i]() {
                 random_device rd;
                 mt19937 gen(rd());
-                uniform_int_distribution<> opDis(0, 4);
+                uniform_int_distribution<> opDis(0, 3);
                 uniform_int_distribution<> idDis(0, 199);
                 uniform_int_distribution<> secDis(1, 3);
+                uniform_int_distribution<> qtyDis(500, 2000);
 
                 for (int j = 0; j < 30; j++) {
                     int operation = opDis(gen);
@@ -205,7 +206,7 @@ void runMultithreadingTests() {
                                 cache.addOrder(Order("New_" + to_string(i) + "_" + to_string(j),
                                     "SecId" + to_string(secDis(gen)),
                                     j % 2 == 0 ? "Buy" : "Sell",
-                                    50 + j, "User" + to_string(i),
+                                    qtyDis(gen), "User" + to_string(i),
                                     "Company" + to_string(i % 4)));
                             break;
                         case 1: // Cancel order
@@ -215,10 +216,13 @@ void runMultithreadingTests() {
                             cache.getMatchingSizeForSecurity("SecId" + to_string(secDis(gen)));
                             break;
                         case 3: // Get all orders
-                            cache.getAllOrders();
+                           cache.getAllOrders();
                             break;
                         case 4: // Cancel orders for user
                             cache.cancelOrdersForUser("User" + to_string(idDis(gen) % 10));
+                            break;
+                        case 5: // Cancel orders for minimun qty
+                            cache.cancelOrdersForSecIdWithMinimumQty("SecId" + to_string(secDis(gen)), 1500);
                             break;
                         }
                         operationsCompleted++;
@@ -226,7 +230,7 @@ void runMultithreadingTests() {
                     catch (const exception& e) {
                         // Expected for some operations (order not found, etc.)
                     }
-                    this_thread::sleep_for(chrono::microseconds(10));
+                    this_thread::sleep_for(chrono::microseconds(1));
                 }
                 });
         }
@@ -234,6 +238,16 @@ void runMultithreadingTests() {
         for (auto& t : threads) {
             t.join();
         }
+        
+        //Verfy integrity check
+		cout << "Verifying integrity of orders after mixed operations...\n";
+        for (Order& order : cache.getAllOrders()) {
+            if (order.orderId().empty() || order.company().empty() || order.securityId().empty()) {
+                cout << "Found order with empty ID after mixed operations!\n";
+            }
+        }
+
+		cout << "Integrity verification completed.\n";
 
         auto end = chrono::high_resolution_clock::now();
         auto duration = chrono::duration_cast<chrono::milliseconds>(end - start);

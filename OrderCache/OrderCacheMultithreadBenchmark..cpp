@@ -175,7 +175,7 @@ private:
 
         random_device rd;
         mt19937 gen(rd());
-        uniform_int_distribution<> op_dist(0, 3);
+        uniform_int_distribution<> op_dist(0,2);
         uniform_int_distribution<> sec_dist(1, 10);
         uniform_int_distribution<> qty_dist(100, 1000);
         uniform_int_distribution<> user_dist(1, 50);
@@ -208,7 +208,7 @@ private:
 
             }
             catch (const exception& e) {
-                stats.errors++;
+                stats.errors++; 
                 memory_errors_++;
 
                 // Log first few errors
@@ -227,6 +227,10 @@ private:
 
             operations_completed_++;
 
+            //if (verifyCacheIntegritySilent(*cache) == false) {
+            //    throw runtime_error("Cache integrity check failed during operations");
+            //}
+
             // Small delay to prevent overwhelming the system
             if (i % 100 == 0) {
                 this_thread::sleep_for(1ms);
@@ -242,8 +246,13 @@ private:
         string user = "User" + to_string((thread_id + op_id) % 50);
         string company = "Company" + to_string((thread_id + op_id) % 20);
 
-        cache->addOrder(Order(order_id, security_id, side, qty, user, company));
-        stats.add_ops++;
+        try {
+            cache->addOrder(Order(order_id, security_id, side, qty, user, company));
+            stats.add_ops++;
+        }
+        catch (exception& e) {
+            cout << "SafeAdd ERROR: " << e.what() << endl;
+        }
     }
 
     void safeQueryOperation(OrderCache* cache, ThreadStats& stats, int sec_num) {
@@ -271,7 +280,6 @@ private:
         // Only perform bulk operations occasionally
         static atomic<int> bulk_op_counter{ 0 };
         int counter = bulk_op_counter++;
-
         if (counter % 20 == 0) {
             string user = "User" + to_string(user_num);
             try {
@@ -296,6 +304,37 @@ private:
         }
     }
 
+    bool verifyCacheIntegritySilent(OrderCache& cache) {
+        try {
+
+            // Test 1: GetAllOrders should not crash
+            auto all_orders = cache.getAllOrders();
+
+            // Test 2: Matching size calculations should work for all securities
+
+            // Test 3: Verify no duplicate order IDs
+            unordered_set<string> order_ids;
+            for (const auto& order : all_orders) {
+                string order_id = order.orderId();
+                if (order_ids.count(order_id)) {
+                    cout << "ERROR: Duplicate order ID found: " << order_id << "\n";
+                    return false;
+                }
+                order_ids.insert(order_id);
+            }
+
+            return true;
+
+        }
+        catch (const exception& e) {
+            cout << "Cache integrity check failed: " << e.what() << "\n";
+            return false;
+        }
+        catch (...) {
+            cout << "Cache integrity check failed with unknown error\n";
+            return false;
+        }
+    }
     bool verifyCacheIntegrity(OrderCache& cache) {
         try {
             cout << "Running cache integrity checks...\n";

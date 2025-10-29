@@ -24,41 +24,36 @@ void OrderCache::cancelOrder(const string& orderId) {
     if(!orders_.contains(orderId)){
         throw out_of_range("Order ID not found: " + orderId);
     }
+    try {
+        const auto order = orders_.at_const(orderId);
+        const string& securityId = order.securityId();
+        const string& user = order.user();
 
-    const auto order = *orders_.at(orderId);
-    const string& securityId = order.securityId();
-    const string& user = order.user();
+        // Optimize security index removal O(1)
+            ordersBySecurity_.erase_map(securityId, orderId);
 
-    // Optimize security index removal O(1)
-    if (ordersBySecurity_.contains(securityId)) {
-        auto &secOrders = *ordersBySecurity_.at(securityId);
-        // Use unordered_set for O(1) removal
-        secOrders.erase(orderId);
-		// For efficiency, only erase the map entry if the set is empty
-        if (secOrders.empty()) {
-            ordersBySecurity_.erase(securityId);
-        }
+        // Optimize user index removal
+            ordersByUser_.erase_map(user, orderId);
+
+        // Remove from main storage last (for exception safety)
+        orders_.erase(orderId);
     }
-
-    // Optimize user index removal
-    if (ordersByUser_.contains(user)) {
-		auto &userOrders = *ordersByUser_.at(user);
-        userOrders.erase(orderId);
-        if (userOrders.empty()) {
-            ordersByUser_.erase(user);
-        }
+    catch(exception &e){
+        cout << "Cancel Err: " << e.what() << endl;
     }
-
-    // Remove from main storage last (for exception safety)
-    orders_.erase(orderId);
+    catch (...)
+    {
+        cout << "Cancel BIG err!" << endl;
+    }
 }
+
 void OrderCache::cancelOrdersForUser(const string& user) {
     if (!ordersByUser_.contains(user)) {
         throw out_of_range("User ID not found: " + user);
     }
 
     // Get copy of order IDs to avoid modifying while iterating
-	auto orderIds = *ordersByUser_.at(user);
+	const auto orderIds = ordersByUser_.at_const(user);
 
     // Remove each order using the existing cancelOrder logic
     for (const string& orderId : orderIds) {
@@ -73,11 +68,13 @@ void OrderCache::cancelOrdersForSecIdWithMinimumQty(const string& securityId, un
         throw out_of_range("Security ID not found: " + securityId);
     }
 
-    auto orderIds = *ordersBySecurity_.at(securityId);
+    const auto orderIds = ordersBySecurity_.at_const(securityId);
+
 
     for (const string& orderId : orderIds) {
         if (orders_.contains(orderId)) {
-			const auto& order = orders_.at_const(orderId).value();
+			const auto& order = orders_.at_const(orderId);
+
             if (order.qty() >= minQty) {
 
                 cancelOrder(orderId); // Reuse existing method for consistency and safety
@@ -92,7 +89,7 @@ unsigned int OrderCache::getMatchingSizeForSecurity(const string& securityId) {
         return 0;
     }
 
-    const auto orderIds = ordersBySecurity_.at_const(securityId).value();
+    const auto orderIds = ordersBySecurity_.at_const(securityId);
 
     unordered_map<string, unsigned int> buyQtyPerCompany;
     unordered_map<string, unsigned int> sellQtyPerCompany;

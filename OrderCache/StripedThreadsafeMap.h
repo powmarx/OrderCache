@@ -12,12 +12,20 @@
 #include <algorithm>
 
 
-template<typename Key, typename Value, typename Hash = std::hash<Key>, size_t StripeCount = 16>
+template<typename Key, 
+         typename Value,
+         typename Hash = std::hash<Key>,
+         typename CrossMutexType = std::shared_mutex,
+         size_t StripeCount = 16>
 class StripedThreadSafeMap {
 private:
+    CrossMutexType* shared_cross_mutex_ = nullptr;
+    bool use_shared_mutex_ = false;
+    using SharedLock = std::shared_lock<CrossMutexType>;
+
     struct StripedBucket {
         std::unordered_map<Key, Value, Hash> data;
-        mutable std::shared_mutex mutex;
+        mutable CrossMutexType mutex;
     };
     
     std::array<StripedBucket, StripeCount> buckets;
@@ -29,6 +37,7 @@ private:
         return const_cast<StripedBucket&>(buckets[index]);
     }
 
+    
     void lock_all() {
         for (auto& bucket : buckets) {
             bucket.mutex.lock();
@@ -38,6 +47,17 @@ private:
     void unlock_all() {
         for (auto& bucket : buckets) {
             bucket.mutex.unlock();
+        }
+    }
+
+    // Get appropriate mutex for operations
+    template<typename LockType>
+    auto get_lock(StripedBucket& bucket) const {
+        if (shared_cross_mutex_) {
+            return LockType(*shared_cross_mutex_);  // Lock cross mutex
+        }
+        else {
+            return LockType(bucket.mutex);  // Lock bucket mutex
         }
     }
 
@@ -57,25 +77,46 @@ public:
         }
     }
 
+    // Enable/disable cross mutex
+    explicit StripedThreadSafeMap(CrossMutexType& shared_mutex)
+        : shared_cross_mutex_(&shared_mutex), use_shared_mutex_(true) {
+    }
+
+    // Method to set shared mutex
+    void set_shared_cross_mutex(CrossMutexType& shared_mutex) {
+        shared_cross_mutex_ = &shared_mutex;
+        use_shared_mutex_ = true;
+    }
+
+    void clear_shared_cross_mutex() {
+        use_shared_mutex_ = false;
+        shared_cross_mutex_ = nullptr;
+    }
+
+    bool is_shared_cross_mutex_enabled() const {
+        return use_shared_mutex_ && shared_cross_mutex_ != nullptr;
+    }
     // @brief Insert or update a key-value pair
     void insert(const Key& key, const Value& value) {
         auto& bucket = get_bucket_for_key(key);
-        std::unique_lock lock(bucket.mutex);
+        auto lock = get_lock<std::unique_lock<CrossMutexType>>(bucket);
         bucket.data[key] = value;
     }
 
     // @brief Insert or update a key-value pair
     void insert_list(const Key& key, const Value& value, int capacity = 10000, float load_factor = 0.7F) {
         auto& bucket = get_bucket_for_key(key);
-        std::unique_lock lock(bucket.mutex);
-		auto it = bucket.data.find(key);
+        auto lock = get_lock<std::unique_lock<CrossMutexType>>(bucket);
+        
+        if (bucket.data.empty() && capacity > 0) {
+            bucket.data.reserve(capacity);
+            bucket.data.max_load_factor(load_factor);
+        }
+        auto it = bucket.data.find(key);
         if (it != bucket.data.end()) {
             it->second.insert(value.begin(), value.end());
         }
-        else
-        {
-			bucket.data.reserve(capacity);  
-			bucket.data.max_load_factor(load_factor);
+        else {
 			bucket.data[key] = value;
         }
     }
@@ -84,7 +125,7 @@ public:
     template<typename... Args>
     void emplace(const Key& key, Args&&... args) {
         auto& bucket = get_bucket_for_key(key);
-        std::unique_lock lock(bucket.mutex);
+        auto lock = get_lock<std::unique_lock<CrossMutexType>>(bucket);
         bucket.data.emplace(key, std::forward<Args>(args)...);
     }
 
@@ -92,22 +133,22 @@ public:
     template<typename... Args>
     auto try_emplace(const Key& key, Args&&... args) {
         auto& bucket = get_bucket_for_key(key);
-        std::unique_lock lock(bucket.mutex);
+        auto lock = get_lock<std::unique_lock<CrossMutexType>>(bucket);
         return bucket.data.try_emplace(key, std::forward<Args>(args)...);
     }
 
     // @brief Get value for key with bounds checking (const version)
-    std::optional<Value> at_const(const Key& key) const {
+    const Value at_const(const Key& key) const {
         auto& bucket = get_bucket_for_key(key);
-        std::shared_lock lock(bucket.mutex);
+        auto lock = get_lock<std::shared_lock<CrossMutexType>>(bucket);
         auto it = bucket.data.find(key);
-        return it != bucket.data.end() ? std::optional<Value>(it->second) : std::nullopt;
+        return it != bucket.data.end() ? (it->second) : Value{};
     }
 	
     // @brief Get value for key with bounds checking (non-const version)
     Value* at(const Key& key) {
         auto& bucket = get_bucket_for_key(key);
-        std::unique_lock lock(bucket.mutex);
+        auto lock = get_lock<std::unique_lock<CrossMutexType>>(bucket);
 
         auto it = bucket.data.find(key);
 
@@ -117,14 +158,15 @@ public:
     // @brief Check if key existsb
     bool contains(const Key& key) const {
         auto& bucket = get_bucket_for_key(key);
-        std::shared_lock lock(bucket.mutex);
+        auto lock = get_lock<std::shared_lock<CrossMutexType>>(bucket);
         return bucket.data.find(key) != bucket.data.end();
     }
 
     // @brief Remove key from map
     bool erase(const Key& key) {
         auto& bucket = get_bucket_for_key(key);
-        std::unique_lock lock(bucket.mutex);
+        auto lock = get_lock<std::unique_lock<CrossMutexType>>(bucket);
+
         return bucket.data.erase(key) > 0;
     }
 
@@ -239,7 +281,7 @@ public:
     template<typename Func>
     bool update(const Key& key, Func update_func) {
         auto& bucket = get_bucket_for_key(key);
-        std::unique_lock lock(bucket.mutex);
+        auto lock = get_lock<std::unique_lock<CrossMutexType>>(bucket);
         auto it = bucket.data.find(key);
         if (it != bucket.data.end()) {
             it->second = update_func(it->second);
@@ -251,7 +293,7 @@ public:
     // @brief Get value or default if key doesn't exist
     Value get_or_default(const Key& key, const Value& default_value) const {
         auto& bucket = get_bucket_for_key(key);
-        std::shared_lock lock(bucket.mutex);
+        auto lock = get_lock<std::shared_lock<CrossMutexType>>(bucket);
         auto it = bucket.data.find(key);
         return it != bucket.data.end() ? it->second : default_value;
     }
@@ -259,7 +301,7 @@ public:
     // @brief Insert if key doesn't exist, otherwise do nothing
     bool insert_if_absent(const Key& key, const Value& value) {
         auto& bucket = get_bucket_for_key(key);
-        std::unique_lock lock(bucket.mutex);
+        auto lock = get_lock<std::unique_lock<CrossMutexType>>(bucket);
         if (bucket.data.find(key) == bucket.data.end()) {
             bucket.data[key] = value;
             return true;
@@ -289,24 +331,62 @@ public:
         return result;
     }
 
+    bool erase_map(const Key& key, const Key& keymap) {
+        auto& bucket = get_bucket_for_key(key);
+        auto lock = get_lock<std::unique_lock<CrossMutexType>>(bucket);
+        auto it = bucket.data.find(key);
+        if (it != bucket.data.end()) {
+            auto it_inside_map = it->second.find(keymap);
+            if (it_inside_map != it->second.end()) {
+                it->second.erase(it_inside_map);
+                if (it->second.empty()) {
+                    bucket.data.erase(key);
+                }
+            }
+            else {
+                return false;
+            }
+        }
+        else{
+            return false;
+        }
+        return true;
+    }
+
     // @brief Thread-safe copy of all values
     std::vector<Value> values() const {
         std::vector<Value> result;
-        std::vector<std::shared_lock<std::shared_mutex>> locks;
+        std::vector<SharedLock> locks;
         locks.reserve(StripeCount);
-        
         size_type total_size = 0;
-        for (auto& bucket : buckets) {
-            locks.emplace_back(bucket.mutex);
-            total_size += bucket.data.size();
-        }
-        
-        result.reserve(total_size);
-        for (auto& bucket : buckets) {
-            for (const auto& pair : bucket.data) {
-                result.push_back(pair.second);
+
+        if (is_shared_cross_mutex_enabled()) {
+            std::shared_lock<CrossMutexType> lock(*shared_cross_mutex_);
+
+
+            for (auto& bucket : buckets) {
+                total_size += bucket.data.size();
+            }
+
+            result.reserve(total_size);
+            for (auto& bucket : buckets) {
+                for (const auto& pair : bucket.data) {
+                    result.push_back(pair.second);
+                }
             }
         }
+        else {
+            for (auto& bucket : buckets) {
+                locks.emplace_back(bucket.mutex);
+                total_size += bucket.data.size();
+            }
+            result.reserve(total_size);
+            for (auto& bucket : buckets) {
+                for (const auto& pair : bucket.data) {
+                    result.push_back(pair.second);
+                }
+            }
+		}
         return result;
     }
 
@@ -352,7 +432,7 @@ public:
     // @brief Subscript operator
     Value& operator[](const Key& key) {
         auto& bucket = get_bucket_for_key(key);
-        std::unique_lock lock(bucket.mutex);
+        auto lock = get_lock<std::unique_lock<CrossMutexType>>(bucket);
         return bucket.data[key];
     }
 
@@ -447,5 +527,6 @@ public:
         return sizes;
     }
 };
+
 
 #endif // STRIPED_THREAD_SAFE_MAP_H_
