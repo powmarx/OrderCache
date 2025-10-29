@@ -25,15 +25,15 @@ void OrderCache::cancelOrder(const string& orderId) {
         throw out_of_range("Order ID not found: " + orderId);
     }
     try {
-        const auto order = orders_.at_const(orderId);
+        const auto order = orders_.at(orderId);
         const string& securityId = order.securityId();
         const string& user = order.user();
 
         // Optimize security index removal O(1)
-            ordersBySecurity_.erase_map(securityId, orderId);
+        ordersBySecurity_.erase_map(securityId, orderId);
 
         // Optimize user index removal
-            ordersByUser_.erase_map(user, orderId);
+        ordersByUser_.erase_map(user, orderId);
 
         // Remove from main storage last (for exception safety)
         orders_.erase(orderId);
@@ -53,7 +53,7 @@ void OrderCache::cancelOrdersForUser(const string& user) {
     }
 
     // Get copy of order IDs to avoid modifying while iterating
-	const auto orderIds = ordersByUser_.at_const(user);
+	const auto orderIds = ordersByUser_.at(user);
 
     // Remove each order using the existing cancelOrder logic
     for (const string& orderId : orderIds) {
@@ -68,12 +68,12 @@ void OrderCache::cancelOrdersForSecIdWithMinimumQty(const string& securityId, un
         throw out_of_range("Security ID not found: " + securityId);
     }
 
-    const auto orderIds = ordersBySecurity_.at_const(securityId);
+    const auto orderIds = ordersBySecurity_.at(securityId);
 
 
     for (const string& orderId : orderIds) {
         if (orders_.contains(orderId)) {
-			const auto& order = orders_.at_const(orderId);
+			const auto& order = orders_.at(orderId);
 
             if (order.qty() >= minQty) {
 
@@ -89,7 +89,7 @@ unsigned int OrderCache::getMatchingSizeForSecurity(const string& securityId) {
         return 0;
     }
 
-    const auto orderIds = ordersBySecurity_.at_const(securityId);
+    const auto orderIds = ordersBySecurity_.at(securityId);
 
     unordered_map<string, unsigned int> buyQtyPerCompany;
     unordered_map<string, unsigned int> sellQtyPerCompany;

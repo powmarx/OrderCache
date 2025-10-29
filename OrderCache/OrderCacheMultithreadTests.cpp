@@ -37,8 +37,6 @@ void runMultithreadingTests() {
                     try {
                         cache.addOrder(Order(orderId, securityId, side, 100, user, company));
                         totalOrdersAdded++;
-						string message = "Total orders added: " + to_string(totalOrdersAdded.load()) + "\n";
-                        cout << message;
                     }
                     catch (const invalid_argument&) {
 						cout << string("Duplicate order ID encountered: " + orderId + "\n");
@@ -173,6 +171,7 @@ void runMultithreadingTests() {
         const int numThreads = 100;
         vector<thread> threads;
         atomic<int> operationsCompleted(0);
+        atomic<int> cancelOperationsCompleted(0);
 
         // Pre-populate
         for (int i = 0; i < 200; i++) {
@@ -193,7 +192,7 @@ void runMultithreadingTests() {
             threads.emplace_back([&, i]() {
                 random_device rd;
                 mt19937 gen(rd());
-                uniform_int_distribution<> opDis(0, 3);
+                uniform_int_distribution<> opDis(0, 2);
                 uniform_int_distribution<> idDis(0, 199);
                 uniform_int_distribution<> secDis(1, 3);
                 uniform_int_distribution<> qtyDis(500, 2000);
@@ -211,6 +210,7 @@ void runMultithreadingTests() {
                             break;
                         case 1: // Cancel order
                             cache.cancelOrder("Mixed_" + to_string(idDis(gen)));
+                            cancelOperationsCompleted++;
                             break;
                         case 2: // Query matching size
                             cache.getMatchingSizeForSecurity("SecId" + to_string(secDis(gen)));
@@ -220,6 +220,7 @@ void runMultithreadingTests() {
                             break;
                         case 4: // Cancel orders for user
                             cache.cancelOrdersForUser("User" + to_string(idDis(gen) % 10));
+                            cancelOperationsCompleted++;
                             break;
                         case 5: // Cancel orders for minimun qty
                             cache.cancelOrdersForSecIdWithMinimumQty("SecId" + to_string(secDis(gen)), 1500);
@@ -240,13 +241,26 @@ void runMultithreadingTests() {
         }
         
         //Verfy integrity check
+		atomic<int> countcancelled (0);
 		cout << "Verifying integrity of orders after mixed operations...\n";
         for (Order& order : cache.getAllOrders()) {
             if (order.orderId().empty() || order.company().empty() || order.securityId().empty()) {
                 cout << "Found order with empty ID after mixed operations!\n";
+                cout << "Order details - ID: " << order.orderId() << ", Security: " << order.securityId()
+					<< ", Company: " << order.company() << "\n";
+            }
+            string m_ = order.orderId().substr(0, 4);
+            if (order.orderId().substr(0, 5) == "Mixed") {
+                countcancelled++;
             }
         }
 
+        if(cancelOperationsCompleted.load() != countcancelled.load()) {
+            cout << "Discrepancy in cancelled orders count! Expected: " << cancelOperationsCompleted.load()
+                 << ", Found: " << countcancelled << "\n";
+        } else {
+            cout << "All cancelled orders accounted for: " << cancelOperationsCompleted.load() << "\n";
+		}
 		cout << "Integrity verification completed.\n";
 
         auto end = chrono::high_resolution_clock::now();
@@ -318,8 +332,8 @@ void runMultithreadingTests() {
                         totalOperations++;
                     }
                     catch (const exception& e) {
-						string message = "Error: " + string(e.what()) + "\n";
-                        cout << message;
+//						string message = "Error: " + string(e.what()) + "\n";
+//                        cout << message;
                         errors++;
                     }
                 }

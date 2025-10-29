@@ -138,23 +138,13 @@ public:
     }
 
     // @brief Get value for key with bounds checking (const version)
-    const Value at_const(const Key& key) const {
+    const Value at(const Key& key) const {
         auto& bucket = get_bucket_for_key(key);
         auto lock = get_lock<std::shared_lock<CrossMutexType>>(bucket);
         auto it = bucket.data.find(key);
         return it != bucket.data.end() ? (it->second) : Value{};
     }
 	
-    // @brief Get value for key with bounds checking (non-const version)
-    Value* at(const Key& key) {
-        auto& bucket = get_bucket_for_key(key);
-        auto lock = get_lock<std::unique_lock<CrossMutexType>>(bucket);
-
-        auto it = bucket.data.find(key);
-
-        // Returns a pointer to the value stored in the map's internal bucket. Safe.
-        return it != bucket.data.end() ? &(it->second) : nullptr;
-    }   
     // @brief Check if key existsb
     bool contains(const Key& key) const {
         auto& bucket = get_bucket_for_key(key);
@@ -352,6 +342,39 @@ public:
         }
         return true;
     }
+
+
+    //template<typename... Args>
+    //bool erase_map(const Key& key, Args&&... args) {
+    //    auto& bucket = get_bucket_for_key(key);
+    //    auto lock = get_lock<std::unique_lock<CrossMutexType>>(bucket);
+
+    //    auto it = bucket.data.find(key);
+    //    if (it == bucket.data.end()) {
+    //        return false;
+    //    }
+
+    //    // Helper: expand parameter pack with index sequence
+    //    bool all_found = true;
+
+    //    // Create an array of bools to capture results
+    //    using expander = int[];
+    //    (void)expander {
+    //        0, (
+    //            all_found = all_found && (it->second.erase(std::forward<Args>(args)) > 0), 0
+    //            )...
+    //    };
+
+    //    if (!all_found) {
+    //        return false;
+    //    }
+
+    //    if (it->second.empty()) {
+    //        bucket.data.erase(key);
+    //    }
+
+    //    return true;
+    //}
 
     // @brief Thread-safe copy of all values
     std::vector<Value> values() const {

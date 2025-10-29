@@ -37,7 +37,7 @@ public:
         cout << "This version includes memory safety checks and debugging\n";
 
         // Test with conservative thread counts first
-        vector<int> thread_counts = { 1, 2, 4, 8 };
+        vector<int> thread_counts = { 1, 2, 4, 8, 16};
         bool success = true;
 
         for (int threads : thread_counts) {
@@ -355,7 +355,7 @@ private:
             for (const auto& order : all_orders) {
                 string order_id = order.orderId();
                 if (order_ids.count(order_id)) {
-                    cout << "ERROR: Duplicate order ID found: " << order_id << "\n";
+                    cout << "ERROR: Duplicate order ID found: " << order_id << " securityId: " << order.securityId() << " userId: " << order.user() << "\n";
                     return false;
                 }
                 order_ids.insert(order_id);
