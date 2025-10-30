@@ -16,7 +16,7 @@ void OrderCache::addOrder(Order order) {
 
     // Update indexes with collision mitigation
     ordersBySecurity_.insert_list(securityId, { orderId });
-    ordersByUser_.insert_list(user, {orderId});
+    ordersByUser_.insert_list(user, {orderId}, 5000);
 }
 
 void OrderCache::cancelOrder(const string& orderId) {

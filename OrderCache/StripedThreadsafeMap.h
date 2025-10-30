@@ -21,7 +21,12 @@ class StripedThreadSafeMap {
 private:
     CrossMutexType* shared_cross_mutex_ = nullptr;
     bool use_shared_mutex_ = false;
+
+    // For inner map in the Value
+    int inside_map_capacity = 0;
+
     using SharedLock = std::shared_lock<CrossMutexType>;
+	using UniqueLock = std::unique_lock<CrossMutexType>;
 
     struct StripedBucket {
         std::unordered_map<Key, Value, Hash> data;
@@ -139,7 +144,7 @@ public:
     template<typename... Args>
     void emplace(const Key& key, Args&&... args) {
         auto& bucket = get_bucket_for_key(key);
-        auto lock = get_lock<std::unique_lock<CrossMutexType>>(bucket);
+        auto lock = get_lock<UniqueLock>(bucket);
         bucket.data.emplace(key, std::forward<Args>(args)...);
     }
 
@@ -147,7 +152,7 @@ public:
     template<typename... Args>
     auto try_emplace(const Key& key, Args&&... args) {
         auto& bucket = get_bucket_for_key(key);
-        auto lock = get_lock<std::unique_lock<CrossMutexType>>(bucket);
+        auto lock = get_lock<UniqueLock>(bucket);
         return bucket.data.try_emplace(key, std::forward<Args>(args)...);
     }
 
@@ -169,7 +174,7 @@ public:
     // @brief Remove key from map
     bool erase(const Key& key) {
         auto& bucket = get_bucket_for_key(key);
-        auto lock = get_lock<std::unique_lock<CrossMutexType>>(bucket);
+        auto lock = get_lock<UniqueLock>(bucket);
 
         return bucket.data.erase(key) > 0;
     }
@@ -203,12 +208,20 @@ public:
 
     // @brief Clear all elements from the map
     void clear() {
-        std::vector<std::unique_lock<std::shared_mutex>> locks;
+        std::vector<UniqueLock> locks;
         locks.reserve(StripeCount);
         
-        for (auto& bucket : buckets) {
-            locks.emplace_back(bucket.mutex);
-            bucket.data.clear();
+        if(is_shared_cross_mutex_enabled()) {
+            UniqueLock lock(*shared_cross_mutex_);
+            for (auto& bucket : buckets) {
+                bucket.data.clear();
+            }
+        }
+        else {
+            for (auto& bucket : buckets) {
+                locks.emplace_back(bucket.mutex);
+                bucket.data.clear();
+            }
         }
     }
 
@@ -335,33 +348,12 @@ public:
         return result;
     }
 
-    bool erase_map(const Key& key, const Key& keymap) {
-        auto& bucket = get_bucket_for_key(key);
-        auto lock = get_lock<std::unique_lock<CrossMutexType>>(bucket);
-        auto it = bucket.data.find(key);
-        if (it != bucket.data.end()) {
-            auto it_inside_map = it->second.find(keymap);
-            if (it_inside_map != it->second.end()) {
-                it->second.erase(it_inside_map);
-                if (it->second.empty()) {
-                    bucket.data.erase(key);
-                }
-            }
-            else {
-                return false;
-            }
-        }
-        else{
-            return false;
-        }
-        return true;
-    }
 
-
+// Safe variadic erase_map: checks existence of all keys first, then erases them
     template<typename... Args>
     bool erase_map(const Key& key, Args&&... args) {
         auto& bucket = get_bucket_for_key(key);
-        auto lock = get_lock<SharedLock>(bucket);
+        auto lock = get_lock<UniqueLock>(bucket);
 
         auto it = bucket.data.find(key);
         if (it == bucket.data.end()) {
@@ -432,17 +424,32 @@ public:
         std::vector<value_type> result;
         std::vector<std::shared_lock<std::shared_mutex>> locks;
         locks.reserve(StripeCount);
-        
         size_type total_size = 0;
-        for (auto& bucket : buckets) {
-            locks.emplace_back(bucket.mutex);
-            total_size += bucket.data.size();
+
+        if (is_shared_cross_mutex_enabled()) {
+            SharedLock lock(*shared_cross_mutex_);
+
+            for (auto& bucket : buckets) {
+                total_size += bucket.data.size();
+            }
+
+            result.reserve(total_size);
+            for (auto& bucket : buckets) {
+                for (const auto& pair : bucket.data) {
+                    result.push_back(pair);
+                }
+            }
         }
-        
-        result.reserve(total_size);
-        for (auto& bucket : buckets) {
-            for (const auto& pair : bucket.data) {
-                result.push_back(pair);
+        else {
+            for (auto& bucket : buckets) {
+                locks.emplace_back(bucket.mutex);
+                total_size += bucket.data.size();
+            }
+            result.reserve(total_size);
+            for (auto& bucket : buckets) {
+                for (const auto& pair : bucket.data) {
+                    result.push_back(pair);
+                }
             }
         }
         return result;
@@ -463,8 +470,6 @@ public:
         }
         return total_size;
     }
-
-    // === OPERATORS ===
 
 
     // @brief Get the current stripe count (useful for monitoring)
