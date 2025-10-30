@@ -95,7 +95,7 @@ void runMultithreadingTests() {
     cout << "\nTest 2: Concurrent Add and Cancel Operations\n";
     {
         OrderCache cache;
-        const int numThreads = 6;
+        const int numThreads = 100;
         vector<thread> threads;
         atomic<int> addSuccess(0);
         atomic<int> addFailure(0);
@@ -158,9 +158,7 @@ void runMultithreadingTests() {
         cout << "Final order count: " << orders.size() << "\n";
         cout << "Execution time: " << duration.count() << "ms\n";
 
-        // Should have initial 100 + added orders - canceled orders
-        // Since we're adding 150 and canceling up to 100, result should be between 150 and 250
-        assert(orders.size() >= 1500 -addFailure && orders.size() <= 1650 && "Order count should be in expected range");
+        assert(orders.size() >= 25000 && orders.size() <= 25000-addFailure && "Order count should be in expected range");
         cout << "Test 2 Passed!\n";
     }
 
@@ -192,7 +190,7 @@ void runMultithreadingTests() {
             threads.emplace_back([&, i]() {
                 random_device rd;
                 mt19937 gen(rd());
-                uniform_int_distribution<> opDis(0, 2);
+                uniform_int_distribution<> opDis(0, 5);
                 uniform_int_distribution<> idDis(0, 199);
                 uniform_int_distribution<> secDis(1, 3);
                 uniform_int_distribution<> qtyDis(500, 2000);
@@ -208,22 +206,22 @@ void runMultithreadingTests() {
                                     qtyDis(gen), "User" + to_string(i),
                                     "Company" + to_string(i % 4)));
                             break;
-                        case 1: // Cancel order
+                        case 1: // Query matching size
+                            cache.getAllOrders();
+                            break;
+                        case 2: // Cancel order
                             cache.cancelOrder("Mixed_" + to_string(idDis(gen)));
                             cancelOperationsCompleted++;
                             break;
-                        case 2: // Query matching size
-                            cache.getMatchingSizeForSecurity("SecId" + to_string(secDis(gen)));
-                            break;
-                        case 3: // Get all orders
-                           cache.getAllOrders();
-                            break;
-                        case 4: // Cancel orders for user
+                        case 3: // Cancel orders for user
                             cache.cancelOrdersForUser("User" + to_string(idDis(gen) % 10));
                             cancelOperationsCompleted++;
                             break;
-                        case 5: // Cancel orders for minimun qty
+                        case 4: // Cancel orders for minimun qty
                             cache.cancelOrdersForSecIdWithMinimumQty("SecId" + to_string(secDis(gen)), 1500);
+                            break;
+                        case 5: // Get all orders
+                            cache.getMatchingSizeForSecurity("SecId" + to_string(secDis(gen)));
                             break;
                         }
                         operationsCompleted++;
@@ -249,7 +247,6 @@ void runMultithreadingTests() {
                 cout << "Order details - ID: " << order.orderId() << ", Security: " << order.securityId()
 					<< ", Company: " << order.company() << "\n";
             }
-            string m_ = order.orderId().substr(0, 4);
             if (order.orderId().substr(0, 5) == "Mixed") {
                 countcancelled++;
             }

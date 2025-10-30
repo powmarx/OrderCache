@@ -62,6 +62,20 @@ private:
     }
 
 public:
+    // @brief For multithreaded safety, operator[] is deleted
+    Value& operator[](const Key& key) = delete;
+    StripedThreadSafeMap& operator=(StripedThreadSafeMap& new_one) = delete;
+	StripedThreadSafeMap(StripedThreadSafeMap& other) = delete;
+	StripedThreadSafeMap(StripedThreadSafeMap&& other) = delete;
+	StripedThreadSafeMap& operator=(StripedThreadSafeMap&& other) = delete;
+	StripedThreadSafeMap(const StripedThreadSafeMap& other) = delete;
+    
+    ~StripedThreadSafeMap() {
+		clear_shared_cross_mutex();
+
+    }
+
+
     using key_type = Key;
     using mapped_type = Value;
     using value_type = std::pair<const Key, Value>;
@@ -344,37 +358,37 @@ public:
     }
 
 
-    //template<typename... Args>
-    //bool erase_map(const Key& key, Args&&... args) {
-    //    auto& bucket = get_bucket_for_key(key);
-    //    auto lock = get_lock<std::unique_lock<CrossMutexType>>(bucket);
+    template<typename... Args>
+    bool erase_map(const Key& key, Args&&... args) {
+        auto& bucket = get_bucket_for_key(key);
+        auto lock = get_lock<SharedLock>(bucket);
 
-    //    auto it = bucket.data.find(key);
-    //    if (it == bucket.data.end()) {
-    //        return false;
-    //    }
+        auto it = bucket.data.find(key);
+        if (it == bucket.data.end()) {
+            return false;
+        }
 
-    //    // Helper: expand parameter pack with index sequence
-    //    bool all_found = true;
+        // Helper: expand parameter pack with index sequence
+        bool all_found = true;
 
-    //    // Create an array of bools to capture results
-    //    using expander = int[];
-    //    (void)expander {
-    //        0, (
-    //            all_found = all_found && (it->second.erase(std::forward<Args>(args)) > 0), 0
-    //            )...
-    //    };
+        // Create an array of bools to capture results
+        using expander = int[];
+        (void)expander {
+            0, (
+                all_found = all_found && (it->second.erase(std::forward<Args>(args)) > 0), 0
+                )...
+        };
 
-    //    if (!all_found) {
-    //        return false;
-    //    }
+        if (!all_found) {
+            return false;
+        }
 
-    //    if (it->second.empty()) {
-    //        bucket.data.erase(key);
-    //    }
+        if (it->second.empty()) {
+            bucket.data.erase(key);
+        }
 
-    //    return true;
-    //}
+        return true;
+    }
 
     // @brief Thread-safe copy of all values
     std::vector<Value> values() const {
@@ -384,7 +398,7 @@ public:
         size_type total_size = 0;
 
         if (is_shared_cross_mutex_enabled()) {
-            std::shared_lock<CrossMutexType> lock(*shared_cross_mutex_);
+            SharedLock lock(*shared_cross_mutex_);
 
 
             for (auto& bucket : buckets) {
@@ -452,84 +466,6 @@ public:
 
     // === OPERATORS ===
 
-    // @brief Subscript operator
-    Value& operator[](const Key& key) {
-        auto& bucket = get_bucket_for_key(key);
-        auto lock = get_lock<std::unique_lock<CrossMutexType>>(bucket);
-        return bucket.data[key];
-    }
-
-    // Copy constructor
-    StripedThreadSafeMap(const StripedThreadSafeMap& other) {
-        std::vector<std::shared_lock<std::shared_mutex>> other_locks;
-        other_locks.reserve(StripeCount);
-        
-        for (auto& bucket : other.buckets) {
-            other_locks.emplace_back(bucket.mutex);
-        }
-        
-        for (size_t i = 0; i < StripeCount; ++i) {
-            buckets[i].data = other.buckets[i].data;
-        }
-    }
-
-    // Copy assignment operator
-    StripedThreadSafeMap& operator=(const StripedThreadSafeMap& other) {
-        if (this != &other) {
-            std::vector<std::unique_lock<std::shared_mutex>> this_locks;
-            std::vector<std::shared_lock<std::shared_mutex>> other_locks;
-            this_locks.reserve(StripeCount);
-            other_locks.reserve(StripeCount);
-
-            for (auto& bucket : buckets) {
-                this_locks.emplace_back(bucket.mutex);
-            }
-            for (auto& bucket : other.buckets) {
-                other_locks.emplace_back(bucket.mutex);
-            }
-
-            for (size_t i = 0; i < StripeCount; ++i) {
-                buckets[i].data = other.buckets[i].data;
-            }
-        }
-        return *this;
-    }
-
-    // Move constructor
-    StripedThreadSafeMap(StripedThreadSafeMap&& other) noexcept {
-        std::vector<std::unique_lock<std::shared_mutex>> other_locks;
-        other_locks.reserve(StripeCount);
-        
-        for (auto& bucket : other.buckets) {
-            other_locks.emplace_back(bucket.mutex);
-        }
-        
-        for (size_t i = 0; i < StripeCount; ++i) {
-            buckets[i].data = std::move(other.buckets[i].data);
-        }
-    }
-
-    // Move assignment operator
-    StripedThreadSafeMap& operator=(StripedThreadSafeMap&& other) noexcept {
-        if (this != &other) {
-            std::vector<std::unique_lock<std::shared_mutex>> this_locks;
-            std::vector<std::unique_lock<std::shared_mutex>> other_locks;
-            this_locks.reserve(StripeCount);
-            other_locks.reserve(StripeCount);
-
-            for (auto& bucket : buckets) {
-                this_locks.emplace_back(bucket.mutex);
-            }
-            for (auto& bucket : other.buckets) {
-                other_locks.emplace_back(bucket.mutex);
-            }
-
-            for (size_t i = 0; i < StripeCount; ++i) {
-                buckets[i].data = std::move(other.buckets[i].data);
-            }
-        }
-        return *this;
-    }
 
     // @brief Get the current stripe count (useful for monitoring)
     constexpr size_t get_stripe_count() const noexcept {

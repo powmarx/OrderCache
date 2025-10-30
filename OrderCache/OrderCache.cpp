@@ -24,7 +24,6 @@ void OrderCache::cancelOrder(const string& orderId) {
     if(!orders_.contains(orderId)){
         throw out_of_range("Order ID not found: " + orderId);
     }
-    try {
         const auto order = orders_.at(orderId);
         const string& securityId = order.securityId();
         const string& user = order.user();
@@ -36,15 +35,9 @@ void OrderCache::cancelOrder(const string& orderId) {
         ordersByUser_.erase_map(user, orderId);
 
         // Remove from main storage last (for exception safety)
-        orders_.erase(orderId);
-    }
-    catch(exception &e){
-        cout << "Cancel Err: " << e.what() << endl;
-    }
-    catch (...)
-    {
-        cout << "Cancel BIG err!" << endl;
-    }
+        if (!orders_.erase(orderId)) {
+            throw std::out_of_range("Order Ihas been deleted: " + orderId);
+        }
 }
 
 void OrderCache::cancelOrdersForUser(const string& user) {
@@ -101,7 +94,7 @@ unsigned int OrderCache::getMatchingSizeForSecurity(const string& securityId) {
     // Aggregate buy and sell quantities by company
     for (const string& oid : orderIds) {
         if (orders_.contains(oid)) {
-            const Order& o = orders_[oid];
+            const Order& o = orders_.at(oid);
             const string& company = o.company(); // Reference, not copy
             unsigned int qty = o.qty();
 

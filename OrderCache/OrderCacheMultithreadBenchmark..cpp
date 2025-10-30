@@ -175,7 +175,7 @@ private:
 
         random_device rd;
         mt19937 gen(rd());
-        uniform_int_distribution<> op_dist(0,2);
+        uniform_int_distribution<> op_dist(0,3);
         uniform_int_distribution<> sec_dist(1, 10);
         uniform_int_distribution<> qty_dist(100, 1000);
         uniform_int_distribution<> user_dist(1, 50);
