@@ -124,7 +124,7 @@ public:
     // @brief Insert or update a key-value pair
     void insert_list(const Key& key, const Value& value, int capacity = 10000, float load_factor = 0.7F) {
         auto& bucket = get_bucket_for_key(key);
-        auto lock = get_lock<std::unique_lock<CrossMutexType>>(bucket);
+        auto lock = get_lock<UniqueLock>(bucket);
         
         if (bucket.data.empty() && capacity > 0) {
             bucket.data.reserve(capacity);
@@ -229,31 +229,25 @@ public:
     void for_each(Func func) const {
         std::vector<std::shared_lock<std::shared_mutex>> locks;
         locks.reserve(StripeCount);
-        
-        for (auto& bucket : buckets) {
-            locks.emplace_back(bucket.mutex);
-        }
-        
-        for (auto& bucket : buckets) {
-            for (const auto& pair : bucket.data) {
-                func(pair.first, pair.second);
-            }
-        }
-    }
 
-    // @brief Apply a function to each key-value pair (non-const version)
-    template<typename Func>
-    void for_each(Func func) {
-        std::vector<std::unique_lock<std::shared_mutex>> locks;
-        locks.reserve(StripeCount);
-        
-        for (auto& bucket : buckets) {
-            locks.emplace_back(bucket.mutex);
+        if (is_shared_cross_mutex_enabled()) {
+            SharedLock lock(*shared_cross_mutex_);
+            for (auto& bucket : buckets) {
+                for (const auto& pair : bucket.data) {
+                    func(pair.first, pair.second);
+                }
+            }
+
         }
-        
-        for (auto& bucket : buckets) {
-            for (auto& pair : bucket.data) {
-                func(pair.first, pair.second);
+        else {
+            for (auto& bucket : buckets) {
+                locks.emplace_back(bucket.mutex);
+            }
+
+            for (auto& bucket : buckets) {
+                for (const auto& pair : bucket.data) {
+                    func(pair.first, pair.second);
+                }
             }
         }
     }
@@ -263,7 +257,17 @@ public:
     std::optional<value_type> find_if(Predicate pred) const {
         std::vector<std::shared_lock<std::shared_mutex>> locks;
         locks.reserve(StripeCount);
-        
+
+        if(is_shared_cross_mutex_enabled()) {
+            SharedLock lock(*shared_cross_mutex_);
+            for (auto& bucket : buckets) {
+                for (const auto& pair : bucket.data) {
+                    if (pred(pair.first, pair.second)) {
+                        return pair;
+                    }
+                }
+            }
+		}
         for (auto& bucket : buckets) {
             locks.emplace_back(bucket.mutex);
             for (const auto& pair : bucket.data) {
@@ -281,12 +285,24 @@ public:
         size_type count = 0;
         std::vector<std::shared_lock<std::shared_mutex>> locks;
         locks.reserve(StripeCount);
-        
-        for (auto& bucket : buckets) {
-            locks.emplace_back(bucket.mutex);
-            for (const auto& pair : bucket.data) {
-                if (pred(pair.first, pair.second)) {
-                    ++count;
+
+        if (is_shared_cross_mutex_enabled()) {
+            SharedLock lock(*shared_cross_mutex_);
+            for (auto& bucket : buckets) {
+                for (const auto& pair : bucket.data) {
+                    if (pred(pair.first, pair.second)) {
+                        ++count;
+                    }
+                }
+            }
+        }
+        else {
+            for (auto& bucket : buckets) {
+                locks.emplace_back(bucket.mutex);
+                for (const auto& pair : bucket.data) {
+                    if (pred(pair.first, pair.second)) {
+                        ++count;
+                    }
                 }
             }
         }
@@ -306,24 +322,6 @@ public:
         return false;
     }
 
-    // @brief Get value or default if key doesn't exist
-    Value get_or_default(const Key& key, const Value& default_value) const {
-        auto& bucket = get_bucket_for_key(key);
-        auto lock = get_lock<std::shared_lock<CrossMutexType>>(bucket);
-        auto it = bucket.data.find(key);
-        return it != bucket.data.end() ? it->second : default_value;
-    }
-
-    // @brief Insert if key doesn't exist, otherwise do nothing
-    bool insert_if_absent(const Key& key, const Value& value) {
-        auto& bucket = get_bucket_for_key(key);
-        auto lock = get_lock<std::unique_lock<CrossMutexType>>(bucket);
-        if (bucket.data.find(key) == bucket.data.end()) {
-            bucket.data[key] = value;
-            return true;
-        }
-        return false;
-    }
 
     // @brief Thread-safe copy of all keys
     std::vector<Key> keys() const {
@@ -331,17 +329,34 @@ public:
         std::vector<std::shared_lock<std::shared_mutex>> locks;
         locks.reserve(StripeCount);
         
-        // First pass: count total elements for reservation
-        size_type total_size = 0;
-        for (auto& bucket : buckets) {
-            locks.emplace_back(bucket.mutex);
-            total_size += bucket.data.size();
+        if(is_shared_cross_mutex_enabled()) {
+            SharedLock lock(*shared_cross_mutex_);
+            // First pass: count total elements for reservation
+            size_type total_size = 0;
+            for (auto& bucket : buckets) {
+                total_size += bucket.data.size();
+            }
+            
+            result.reserve(total_size);
+            for (auto& bucket : buckets) {
+                for (const auto& pair : bucket.data) {
+                    result.push_back(pair.first);
+                }
+            }
         }
-        
-        result.reserve(total_size);
-        for (auto& bucket : buckets) {
-            for (const auto& pair : bucket.data) {
-                result.push_back(pair.first);
+        else {
+            // First pass: count total elements for reservation
+            size_type total_size = 0;
+            for (auto& bucket : buckets) {
+                locks.emplace_back(bucket.mutex);
+                total_size += bucket.data.size();
+            }
+
+            result.reserve(total_size);
+            for (auto& bucket : buckets) {
+                for (const auto& pair : bucket.data) {
+                    result.push_back(pair.first);
+                }
             }
         }
         return result;

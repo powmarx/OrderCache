@@ -12,7 +12,7 @@
 #include <functional>
 #include <memory>
 #include <cassert>
-#include <unordered_map>
+#include <map>
 
 using namespace std;
 using namespace std::chrono;
@@ -42,8 +42,8 @@ private:
         long query_ops{ 0 };
         long bulk_cancel_ops{ 0 };
         long total_errors{ 0 };
-		unordered_map<string, int> error_types;
-        unordered_map<string, vector<microseconds>> latencies;
+		map<string, int> error_types;
+        map<string, vector<microseconds>> latencies;
     };
 
 public:
@@ -191,11 +191,11 @@ private:
         random_device rd;
         mt19937 gen(rd());
         uniform_int_distribution<> op_dist(0,3);
-        uniform_int_distribution<> sec_dist(1, 10);
+        uniform_int_distribution<> sec_dist(1, 100);
         uniform_int_distribution<> qty_dist(100, 1000);
-        uniform_int_distribution<> user_dist(1, 50);
+        uniform_int_distribution<> user_dist(1, 500);
 
-        stats.latencies.reserve(operations);
+//        stats.latencies. reserve(operations);
 
         for (int i = 0; i < operations && !stop_requested_.load(); i++) {
             auto start_time = high_resolution_clock::now();
