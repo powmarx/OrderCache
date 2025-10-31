@@ -69,7 +69,6 @@ private:
 public:
     // @brief For multithreaded safety, operator[] is deleted
     Value& operator[](const Key& key) = delete;
-    StripedThreadSafeMap& operator=(StripedThreadSafeMap& new_one) = delete;
 	StripedThreadSafeMap(StripedThreadSafeMap& other) = delete;
 	StripedThreadSafeMap(StripedThreadSafeMap&& other) = delete;
 	StripedThreadSafeMap& operator=(StripedThreadSafeMap&& other) = delete;
