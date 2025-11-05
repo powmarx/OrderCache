@@ -196,12 +196,10 @@ private:
         uniform_int_distribution<> user_dist(1, 500);
 
 //        stats.latencies. reserve(operations);
-
         for (int i = 0; i < operations && !stop_requested_.load(); i++) {
             auto start_time = high_resolution_clock::now();
             try {
                 int operation = op_dist(gen);
-
                 switch (operation) {
                 case 0: // Safe add operation
                     safeAddOperation(thread_id, i, cache, stats);
@@ -240,10 +238,6 @@ private:
             }
 
             operations_completed_++;
-
-            //if (verifyCacheIntegritySilent(*cache) == false) {
-            //    throw runtime_error("Cache integrity check failed during operations");
-            //}
 
             // Small delay to prevent overwhelming the system
             if (i % 100 == 0) {
@@ -414,7 +408,7 @@ private:
 
         cout << "\n=== SAFE BENCHMARK RESULTS ===\n";
         cout << "Threads: " << num_threads << "\n";
-        cout << "Total Operations: " << total_ops << "\n";
+        cout << "Total Successfull Operations: " << total_ops << "\n";
         cout << "  - Add: " << total.add_ops << " (" << (total.add_ops * 100.0 / total_ops) << "%)\n";
         cout << "  - Cancel: " << total.cancel_ops << " (" << (total.cancel_ops * 100.0 / total_ops) << "%)\n";
         cout << "  - Query: " << total.query_ops << " (" << (total.query_ops * 100.0 / total_ops) << "%)\n";

@@ -74,9 +74,9 @@ int main() {
         }
         case 50: {
             int numOrders;
-            cout << "Enter number of orders for benchmark (1-1000000, or 0 for default sizes): ";
-            if (!(cin >> numOrders) || numOrders < 0 || numOrders > 1000000) {
-                cout << "Invalid number of orders. Please enter a number between 0 and 10000.\n";
+            cout << "Enter number of orders for benchmark (1-10000000, or 0 for default sizes): ";
+            if (!(cin >> numOrders) || numOrders < 0 || numOrders > 10000000) {
+                cout << "Invalid number of orders. Please enter a number between 0 and 10000000.\n";
                 clearInputBuffer();
                 continue;
             }

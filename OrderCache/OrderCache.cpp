@@ -10,7 +10,7 @@ void OrderCache::addOrder(Order order) {
     const string& securityId = order.securityId();
     const string& user = order.user();// Add to main storage
 
-    if (!(orders_.try_emplace(orderId, order).second)) {
+    if (!orders_.try_emplace(orderId, order)) {
         throw invalid_argument("Duplicate Order ID: " + orderId);
     }
 

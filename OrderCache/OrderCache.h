@@ -28,6 +28,16 @@ public:
 		orders_.set_shared_cross_mutex(mutex_);
 		ordersBySecurity_.set_shared_cross_mutex(mutex_);
 		ordersByUser_.set_shared_cross_mutex(mutex_);
+		const StripedMap<string, Order>::size_type initial_tombstones = 10000;
+
+		orders_.start_auto_purge(std::chrono::milliseconds(60000)); // Purge every 60s if tombstones exceed 10000
+		orders_.set_purge_threshold(initial_tombstones);
+
+		ordersBySecurity_.start_auto_purge(std::chrono::milliseconds(60000));
+		ordersBySecurity_.set_purge_threshold(initial_tombstones);
+
+		ordersByUser_.start_auto_purge(std::chrono::milliseconds(60000));
+		ordersByUser_.set_purge_threshold(initial_tombstones);
     }
     void addOrder(Order order) override;
     void cancelOrder(const string& orderId) override;

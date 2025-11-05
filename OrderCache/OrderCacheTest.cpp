@@ -263,7 +263,7 @@ void runExample4Tests() {
     // Add orders from the example
 	ordersBuy.clear();
     ordersBuy = {
-        Order("OrdId1", "SecId1", "Buy", 1000, "User1", "CompanyA"),
+        Order("OrdId1", "SecId1", "Buy", 2000, "User1", "CompanyA"),
         Order("OrdId2", "SecId2", "Sell", 3000, "User2", "CompanyB"),
         Order("OrdId3", "SecId1", "Sell", 500, "User3", "CompanyC"),
         Order("OrdId4", "SecId2", "Buy", 600, "User4", "CompanyD"),
