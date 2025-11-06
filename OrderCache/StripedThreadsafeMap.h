@@ -85,12 +85,21 @@ private:
         return bucket.deleted_keys.find(key) != bucket.deleted_keys.end();
     }
 
+    // DEADLOCK-SAFE HELPER: lock all buckets in deterministic index order and keep locks alive
+    template <typename LockType>
+    std::vector<LockType> lock_all_buckets() const {
+        std::vector<LockType> locks;
+        locks.reserve(StripeCount);
+        for (size_t i = 0; i < StripeCount; ++i) {
+            locks.emplace_back(buckets[i].mutex);
+        }
+        return locks;
+    }
+
     // internal purge function (assumes caller handles locking strategy if needed)
     void purge_marked_internal() {
-        std::vector<UniqueLock> locks;
-        locks.reserve(StripeCount);
-
         if (is_shared_cross_mutex_enabled()) {
+            // Single cross mutex protects entire structure
             UniqueLock lock(*shared_cross_mutex_);
             for (auto& bucket : buckets) {
                 size_type removed = bucket.deleted_keys.size();
@@ -103,8 +112,10 @@ private:
             }
         }
         else {
-            for (auto& bucket : buckets) {
-                locks.emplace_back(bucket.mutex);
+            // DEADLOCK-SAFE: acquire all bucket locks in index order
+            auto locks = lock_all_buckets<UniqueLock>();
+            for (size_t i = 0; i < StripeCount; ++i) {
+                auto& bucket = buckets[i];
                 size_type removed = bucket.deleted_keys.size();
                 for (const auto& k : bucket.deleted_keys) {
                     bucket.data.erase(k);
@@ -295,18 +306,13 @@ public:
         if (erased) {
             tombstone_count_.fetch_sub(1, std::memory_order_relaxed);
             bucket.data[key] = Value(std::forward<Args>(args)...);
-            return true;
+            return;
         }
         auto result = bucket.data.emplace(key, std::forward<Args>(args)...);
-        if (result.second) {
-            return true;
-        }
-        else {
-            return false;
-        }
+        (void)result;
     }
 
-	// @brief Try to emplace a key-value pair or update if mark deleted
+    // @brief Try to emplace a key-value pair or update if mark deleted
     template<typename... Args>
     bool try_emplace(const Key& key, Args&&... args) {
         auto& bucket = get_bucket_for_key(key);
@@ -314,16 +320,11 @@ public:
         size_type erased = bucket.deleted_keys.erase(key);
         if (erased) {
             tombstone_count_.fetch_sub(1, std::memory_order_relaxed);
-			bucket.data[key] = Value(std::forward<Args>(args)...);
-			return true;
-        }
-        auto result = bucket.data.try_emplace(key, std::forward<Args>(args)...);
-        if (result.second) {
+            bucket.data[key] = Value(std::forward<Args>(args)...);
             return true;
         }
-        else {
-            return false;
-        }
+        auto result = bucket.data.try_emplace(key, std::forward<Args>(args)...);
+        return result.second;
     }
 
     // @brief Get value for key with bounds checking (const version)
@@ -414,11 +415,10 @@ public:
             }
         }
         else {
-            std::vector<std::shared_lock<CrossMutexType>> locks;
-            locks.reserve(StripeCount);
-            for (auto& bucket : buckets) {
-                locks.emplace_back(bucket.mutex);
-                total_size += (bucket.data.size() > bucket.deleted_keys.size()) ? (bucket.data.size() - bucket.deleted_keys.size()) : 0;
+            // DEADLOCK-SAFE: lock all buckets in index order
+            auto locks = lock_all_buckets<SharedLock>();
+            for (size_t i = 0; i < StripeCount; ++i) {
+                total_size += (buckets[i].data.size() > buckets[i].deleted_keys.size()) ? (buckets[i].data.size() - buckets[i].deleted_keys.size()) : 0;
             }
         }
         return total_size;
@@ -437,13 +437,11 @@ public:
             }
         }
         else {
-            std::vector<std::shared_lock<CrossMutexType>> locks;
-            locks.reserve(StripeCount);
-
-            for (auto& bucket : buckets) {
-                locks.emplace_back(bucket.mutex);
-                for (const auto& kv : bucket.data) {
-                    if (bucket.deleted_keys.find(kv.first) == bucket.deleted_keys.end()) {
+            // DEADLOCK-SAFE: lock all buckets in index order
+            auto locks = lock_all_buckets<SharedLock>();
+            for (size_t i = 0; i < StripeCount; ++i) {
+                for (const auto& kv : buckets[i].data) {
+                    if (buckets[i].deleted_keys.find(kv.first) == buckets[i].deleted_keys.end()) {
                         return false;
                     }
                 }
@@ -454,9 +452,6 @@ public:
 
     // @brief Clear all elements from the map (real deletion). If mark_only==true will only mark all existing keys deleted.
     void clear(bool mark_only = true) {
-        std::vector<UniqueLock> locks;
-        locks.reserve(StripeCount);
-
         if (is_shared_cross_mutex_enabled()) {
             UniqueLock lock(*shared_cross_mutex_);
             for (auto& bucket : buckets) {
@@ -475,8 +470,10 @@ public:
             }
         }
         else {
-            for (auto& bucket : buckets) {
-                locks.emplace_back(bucket.mutex);
+            // DEADLOCK-SAFE: lock all buckets in index order
+            auto locks = lock_all_buckets<UniqueLock>();
+            for (size_t i = 0; i < StripeCount; ++i) {
+                auto& bucket = buckets[i];
                 if (mark_only) {
                     for (const auto& kv : bucket.data) {
                         auto p = bucket.deleted_keys.insert(kv.first);
@@ -511,11 +508,10 @@ public:
     std::vector<size_type> get_bucket_tombstone_counts() const {
         std::vector<size_type> out;
         out.reserve(StripeCount);
-        std::vector<std::shared_lock<CrossMutexType>> locks;
-        locks.reserve(StripeCount);
-        for (auto& bucket : buckets) {
-            locks.emplace_back(bucket.mutex);
-            out.push_back(bucket.deleted_keys.size());
+        // DEADLOCK-SAFE: lock all buckets in index order
+        auto locks = lock_all_buckets<SharedLock>();
+        for (size_t i = 0; i < StripeCount; ++i) {
+            out.push_back(buckets[i].deleted_keys.size());
         }
         return out;
     }
@@ -534,13 +530,11 @@ public:
             }
         }
         else {
-            std::vector<std::shared_lock<CrossMutexType>> locks;
-            locks.reserve(StripeCount);
-            for (auto& bucket : buckets) locks.emplace_back(bucket.mutex);
-
-            for (auto& bucket : buckets) {
-                for (const auto& pair : bucket.data) {
-                    if (bucket.deleted_keys.find(pair.first) == bucket.deleted_keys.end()) {
+            // DEADLOCK-SAFE: lock all buckets in index order
+            auto locks = lock_all_buckets<SharedLock>();
+            for (size_t i = 0; i < StripeCount; ++i) {
+                for (const auto& pair : buckets[i].data) {
+                    if (buckets[i].deleted_keys.find(pair.first) == buckets[i].deleted_keys.end()) {
                         func(pair.first, pair.second);
                     }
                 }
@@ -560,13 +554,13 @@ public:
                     }
                 }
             }
+            return std::nullopt;
         }
-        std::vector<std::shared_lock<CrossMutexType>> locks;
-        locks.reserve(StripeCount);
-        for (auto& bucket : buckets) {
-            locks.emplace_back(bucket.mutex);
-            for (const auto& pair : bucket.data) {
-                if (bucket.deleted_keys.find(pair.first) == bucket.deleted_keys.end() && pred(pair.first, pair.second)) {
+        // DEADLOCK-SAFE: lock all buckets in index order
+        auto locks = lock_all_buckets<SharedLock>();
+        for (size_t i = 0; i < StripeCount; ++i) {
+            for (const auto& pair : buckets[i].data) {
+                if (buckets[i].deleted_keys.find(pair.first) == buckets[i].deleted_keys.end() && pred(pair.first, pair.second)) {
                     return pair;
                 }
             }
@@ -589,12 +583,11 @@ public:
             }
         }
         else {
-            std::vector<std::shared_lock<CrossMutexType>> locks;
-            locks.reserve(StripeCount);
-            for (auto& bucket : buckets) {
-                locks.emplace_back(bucket.mutex);
-                for (const auto& pair : bucket.data) {
-                    if (bucket.deleted_keys.find(pair.first) == bucket.deleted_keys.end() && pred(pair.first, pair.second)) {
+            // DEADLOCK-SAFE: lock all buckets in index order
+            auto locks = lock_all_buckets<SharedLock>();
+            for (size_t i = 0; i < StripeCount; ++i) {
+                for (const auto& pair : buckets[i].data) {
+                    if (buckets[i].deleted_keys.find(pair.first) == buckets[i].deleted_keys.end() && pred(pair.first, pair.second)) {
                         ++count;
                     }
                 }
@@ -635,17 +628,16 @@ public:
             }
         }
         else {
-            std::vector<std::shared_lock<CrossMutexType>> locks;
-            locks.reserve(StripeCount);
+            // DEADLOCK-SAFE: lock all buckets in index order
+            auto locks = lock_all_buckets<SharedLock>();
             size_type total_size = 0;
-            for (auto& bucket : buckets) {
-                locks.emplace_back(bucket.mutex);
-                total_size += (bucket.data.size() > bucket.deleted_keys.size()) ? (bucket.data.size() - bucket.deleted_keys.size()) : 0;
+            for (size_t i = 0; i < StripeCount; ++i) {
+                total_size += (buckets[i].data.size() > buckets[i].deleted_keys.size()) ? (buckets[i].data.size() - buckets[i].deleted_keys.size()) : 0;
             }
             result.reserve(total_size);
-            for (auto& bucket : buckets) {
-                for (const auto& pair : bucket.data) {
-                    if (bucket.deleted_keys.find(pair.first) == bucket.deleted_keys.end()) {
+            for (size_t i = 0; i < StripeCount; ++i) {
+                for (const auto& pair : buckets[i].data) {
+                    if (buckets[i].deleted_keys.find(pair.first) == buckets[i].deleted_keys.end()) {
                         result.push_back(pair.first);
                     }
                 }
@@ -709,17 +701,16 @@ public:
             }
         }
         else {
-            std::vector<SharedLock> locks;
-            locks.reserve(StripeCount);
+            // DEADLOCK-SAFE: lock all buckets in index order
+            auto locks = lock_all_buckets<SharedLock>();
             size_type total_size = 0;
-            for (auto& bucket : buckets) {
-                locks.emplace_back(bucket.mutex);
-                total_size += (bucket.data.size() > bucket.deleted_keys.size()) ? (bucket.data.size() - bucket.deleted_keys.size()) : 0;
+            for (size_t i = 0; i < StripeCount; ++i) {
+                total_size += (buckets[i].data.size() > buckets[i].deleted_keys.size()) ? (buckets[i].data.size() - buckets[i].deleted_keys.size()) : 0;
             }
             result.reserve(total_size);
-            for (auto& bucket : buckets) {
-                for (const auto& pair : bucket.data) {
-                    if (bucket.deleted_keys.find(pair.first) == bucket.deleted_keys.end()) {
+            for (size_t i = 0; i < StripeCount; ++i) {
+                for (const auto& pair : buckets[i].data) {
+                    if (buckets[i].deleted_keys.find(pair.first) == buckets[i].deleted_keys.end()) {
                         result.push_back(pair.second);
                     }
                 }
@@ -747,17 +738,16 @@ public:
             }
         }
         else {
-            std::vector<std::shared_lock<std::shared_mutex>> locks;
-            locks.reserve(StripeCount);
+            // DEADLOCK-SAFE: lock all buckets in index order
+            auto locks = lock_all_buckets<SharedLock>();
             size_type total_size = 0;
-            for (auto& bucket : buckets) {
-                locks.emplace_back(bucket.mutex);
-                total_size += (bucket.data.size() > bucket.deleted_keys.size()) ? (bucket.data.size() - bucket.deleted_keys.size()) : 0;
+            for (size_t i = 0; i < StripeCount; ++i) {
+                total_size += (buckets[i].data.size() > buckets[i].deleted_keys.size()) ? (buckets[i].data.size() - buckets[i].deleted_keys.size()) : 0;
             }
             result.reserve(total_size);
-            for (auto& bucket : buckets) {
-                for (const auto& pair : bucket.data) {
-                    if (bucket.deleted_keys.find(pair.first) == bucket.deleted_keys.end()) {
+            for (size_t i = 0; i < StripeCount; ++i) {
+                for (const auto& pair : buckets[i].data) {
+                    if (buckets[i].deleted_keys.find(pair.first) == buckets[i].deleted_keys.end()) {
                         result.push_back(pair);
                     }
                 }
@@ -803,12 +793,10 @@ public:
     std::vector<size_type> get_bucket_sizes() const {
         std::vector<size_type> sizes;
         sizes.reserve(StripeCount);
-        std::vector<std::shared_lock<CrossMutexType>> locks;
-        locks.reserve(StripeCount);
-
-        for (auto& bucket : buckets) {
-            locks.emplace_back(bucket.mutex);
-            size_type sz = (bucket.data.size() > bucket.deleted_keys.size()) ? (bucket.data.size() - bucket.deleted_keys.size()) : 0;
+        // DEADLOCK-SAFE: lock all buckets in index order
+        auto locks = lock_all_buckets<SharedLock>();
+        for (size_t i = 0; i < StripeCount; ++i) {
+            size_type sz = (buckets[i].data.size() > buckets[i].deleted_keys.size()) ? (buckets[i].data.size() - buckets[i].deleted_keys.size()) : 0;
             sizes.push_back(sz);
         }
         return sizes;
