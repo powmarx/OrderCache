@@ -16,6 +16,7 @@
 
 using namespace std;
 using namespace std::chrono;
+constexpr const int NumberOfPrePopulateOrders = 1000;
 
 class SafeMultithreadBenchmark {
 private:
@@ -84,7 +85,7 @@ private:
             memory_errors_.store(0);
 
             cout << "Phase 1: Pre-populating cache...\n";
-            if (!prePopulateSafely(*cache, 1000)) {
+            if (!prePopulateSafely(*cache, NumberOfPrePopulateOrders)) {
                 cout << "ERROR: Pre-population failed\n";
                 return false;
             }
@@ -106,7 +107,7 @@ private:
             start_flag.store(true);
 
             // Let them run
-            this_thread::sleep_for(5s);
+            this_thread::sleep_for(1s);
  //           stop_requested_.store(true);
 
             // Wait for completion
@@ -123,7 +124,7 @@ private:
                 return false;
             }
 
-            printSafeResults(stats, num_threads);
+            printSafeResults(stats, num_threads, cache.get());
             return true;
 
         }
@@ -194,6 +195,7 @@ private:
         uniform_int_distribution<> sec_dist(1, 100);
         uniform_int_distribution<> qty_dist(100, 1000);
         uniform_int_distribution<> user_dist(1, 500);
+        uniform_int_distribution<> cpny_dist(1, 100);
 
 //        stats.latencies. reserve(operations);
         for (int i = 0; i < operations && !stop_requested_.load(); i++) {
@@ -202,7 +204,7 @@ private:
                 int operation = op_dist(gen);
                 switch (operation) {
                 case 0: // Safe add operation
-                    safeAddOperation(thread_id, i, cache, stats);
+                    safeAddOperation(thread_id, i, cache, stats, cpny_dist(gen), sec_dist(gen), user_dist(gen));
                     break;
                 case 1: // Safe query operation  
                     safeQueryOperation(cache, stats, sec_dist(gen));
@@ -211,7 +213,7 @@ private:
                     safeCancelOperation(thread_id, i, cache, stats);
                     break;
                 case 3: // Safe bulk operation
-                    safeBulkOperation(cache, stats, user_dist(gen), sec_dist(gen));
+                    safeBulkOperation(cache, stats, user_dist(gen), sec_dist(gen), qty_dist(gen));
                     break;
                 }
 
@@ -246,13 +248,13 @@ private:
         }
     }
 
-    void safeAddOperation(int thread_id, int op_id, OrderCache* cache, ThreadStats& stats) {
+    void safeAddOperation(int thread_id, int op_id, OrderCache* cache, ThreadStats& stats, int company_, int sec_, int user_) {
         string order_id = "T" + to_string(thread_id) + "A" + to_string(op_id);
-        string security_id = "Sec" + to_string((thread_id + op_id) % 10 + 1);
+        string security_id = "Sec" + to_string(sec_);
         string side = (op_id % 2 == 0) ? "Buy" : "Sell";
         unsigned int qty = 100 + (op_id % 900);
-        string user = "User" + to_string((thread_id + op_id) % 50);
-        string company = "Company" + to_string((thread_id + op_id) % 20);
+        string user = "User" + to_string(user_);
+        string company = "Company" + to_string(company_);
 
         try {
             cache->addOrder(Order(order_id, security_id, side, qty, user, company));
@@ -289,7 +291,7 @@ private:
         }
     }
 
-    void safeBulkOperation(OrderCache* cache, ThreadStats& stats, int user_num, int sec_num) {
+    void safeBulkOperation(OrderCache* cache, ThreadStats& stats, int user_num, int sec_num, int qty_) {
         // Only perform bulk operations occasionally
         static atomic<int> bulk_op_counter{ 0 };
         int counter = bulk_op_counter++;
@@ -307,7 +309,7 @@ private:
         else if (counter % 25 == 0) {
             string security = "Sec" + to_string(sec_num);
             try {
-                cache->cancelOrdersForSecIdWithMinimumQty(security, 500);
+                cache->cancelOrdersForSecIdWithMinimumQty(security, qty_);
                 stats.bulk_cancel_ops++;
             }
             catch (const out_of_range&) {
@@ -388,7 +390,7 @@ private:
         }
     }
 
-    void printSafeResults(const vector<ThreadStats>& stats, int num_threads) {
+    void printSafeResults(const vector<ThreadStats>& stats, int num_threads, OrderCache* cache) {
         ThreadStats total;
         unordered_map<string, vector<microseconds>> all_latencies;
 
@@ -413,12 +415,15 @@ private:
         cout << "  - Cancel: " << total.cancel_ops << " (" << (total.cancel_ops * 100.0 / total_ops) << "%)\n";
         cout << "  - Query: " << total.query_ops << " (" << (total.query_ops * 100.0 / total_ops) << "%)\n";
         cout << "  - Bulk Cancel: " << total.bulk_cancel_ops << " (" << (total.bulk_cancel_ops * 100.0 / total_ops) << "%)\n";
+		size_t number_of_orders = cache->getAllOrders().size();
+		cout << "Verifying remaining orders in cache: " << number_of_orders << "\n";
+		cout << "Remaining Orders in Cache: " << total.add_ops + NumberOfPrePopulateOrders - cache->getCancelledOrdersCount() << endl;
 		cout << "Error Types:\n"; 
         for (const auto& pair : total.error_types) {
             cout << "  - " << pair.first << ": " << pair.second << "\n";
 			total.total_errors += pair.second;
         }
-        cout << "Errors: " << total.total_errors << " (" << (total.total_errors * 100.0 / total_ops) << "%)\n";
+        cout << "Errors: " << total.total_errors << " (" << (total.total_errors * 100.0 / (total_ops+total.total_errors)) << "%)\n";
         cout << "Memory Errors: " << memory_errors_.load() << "\n";
 
 		//Print latencies and operations per second

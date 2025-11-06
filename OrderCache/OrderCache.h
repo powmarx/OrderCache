@@ -23,12 +23,14 @@ private:
 	// Indexes for efficient queries
     StripedMap<string, unordered_set<string>> ordersBySecurity_;
     StripedMap<string, unordered_set<string>> ordersByUser_;
+
+    atomic<int> countCancelledOrders{ 0 };
 public:
     OrderCache() {
 		orders_.set_shared_cross_mutex(mutex_);
 		ordersBySecurity_.set_shared_cross_mutex(mutex_);
 		ordersByUser_.set_shared_cross_mutex(mutex_);
-		const StripedMap<string, Order>::size_type initial_tombstones = 10000;
+		const StripedMap<string, Order>::size_type initial_tombstones = 100000;
 
 		orders_.start_auto_purge(std::chrono::milliseconds(60000)); // Purge every 60s if tombstones exceed 10000
 		orders_.set_purge_threshold(initial_tombstones);
@@ -45,4 +47,7 @@ public:
     void cancelOrdersForSecIdWithMinimumQty(const string& securityId, unsigned int minQty) override;
     unsigned int getMatchingSizeForSecurity(const string& securityId) override;
     vector<Order> getAllOrders() const override;
+    int getCancelledOrdersCount() const {
+        return countCancelledOrders.load();
+	}
 };

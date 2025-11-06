@@ -348,7 +348,7 @@ public:
     }
 
     // @brief Remove key from map (real deletion). If mark_only==true will only mark deleted (soft-delete)
-    bool erase(const Key& key, bool mark_only = true) {
+    bool erase(const Key& key, bool mark_only = false) {
         auto& bucket = get_bucket_for_key(key);
         auto lock = get_lock<UniqueLock>(bucket);
 

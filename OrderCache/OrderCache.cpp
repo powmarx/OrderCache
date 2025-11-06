@@ -21,23 +21,25 @@ void OrderCache::addOrder(Order order) {
 
 void OrderCache::cancelOrder(const string& orderId) {
     // Single lookup in main storage
-    if(!orders_.contains(orderId)){
+    if (!orders_.contains(orderId)) {
         throw out_of_range("Order ID not found: " + orderId);
     }
-        const auto order = orders_.at(orderId);
-        const string& securityId = order.securityId();
-        const string& user = order.user();
+    const auto order = orders_.at(orderId);
+    const string& securityId = order.securityId();
+    const string& user = order.user();
 
-        // Optimize security index removal O(1)
-        ordersBySecurity_.erase_map(securityId, orderId);
+    // Optimize security index removal O(1)
+    ordersBySecurity_.erase_map(securityId, orderId);
 
-        // Optimize user index removal
-        ordersByUser_.erase_map(user, orderId);
+    // Optimize user index removal
+    ordersByUser_.erase_map(user, orderId);
 
-        // Remove from main storage last (for exception safety)
-        if (!orders_.erase(orderId)) {
-            throw std::out_of_range("Order Ihas been deleted: " + orderId);
-        }
+    // Remove from main storage last (for exception safety)
+    if (!orders_.erase(orderId)) {
+        throw std::out_of_range("Order has been deleted: " + orderId);
+    }
+    countCancelledOrders++;
+
 }
 
 void OrderCache::cancelOrdersForUser(const string& user) {
@@ -71,6 +73,7 @@ void OrderCache::cancelOrdersForSecIdWithMinimumQty(const string& securityId, un
             if (order.qty() >= minQty) {
 
                 cancelOrder(orderId); // Reuse existing method for consistency and safety
+
             }
         }
     }
