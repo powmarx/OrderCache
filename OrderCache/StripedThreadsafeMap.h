@@ -34,7 +34,6 @@ private:
     CrossMutexType* shared_cross_mutex_ = nullptr;
     bool use_shared_mutex_ = false;
 
-
     struct StripedBucket {
         std::unordered_map<Key, Value, Hash> data;
         // tombstones / deleted markers (soft delete)
@@ -86,6 +85,7 @@ private:
     }
 
     // DEADLOCK-SAFE HELPER: lock all buckets in deterministic index order and keep locks alive
+    // Using a fixed lock acquisition order prevents cyclic waits among threads.
     template <typename LockType>
     std::vector<LockType> lock_all_buckets() const {
         std::vector<LockType> locks;
@@ -108,7 +108,7 @@ private:
                 }
                 bucket.deleted_keys.clear();
                 // adjust tombstone_count_
-                tombstone_count_.fetch_sub(removed, std::memory_order_relaxed);
+                if (removed) tombstone_count_.fetch_sub(removed, std::memory_order_relaxed);
             }
         }
         else {
@@ -121,10 +121,10 @@ private:
                     bucket.data.erase(k);
                 }
                 bucket.deleted_keys.clear();
-                tombstone_count_.fetch_sub(removed, std::memory_order_relaxed);
+                if (removed) tombstone_count_.fetch_sub(removed, std::memory_order_relaxed);
             }
         }
-        // Optionally call notification callback to indicate number dropped to zero
+        // Optionally call notification callback to indicate number changed
         maybe_notify();
     }
 
@@ -188,7 +188,6 @@ public:
         clear_shared_cross_mutex();
     }
 
-
     // @brief Default constructor
     StripedThreadSafeMap() = default;
 
@@ -206,11 +205,14 @@ public:
 
     // Method to set shared mutex
     void set_shared_cross_mutex(CrossMutexType& shared_mutex) {
+        // NOTE: switching modes while other threads are active can be sensitive;
+        // if needed, acquire all bucket locks here before flipping (omitted to match original semantics).
         shared_cross_mutex_ = &shared_mutex;
         use_shared_mutex_ = true;
     }
 
     void clear_shared_cross_mutex() {
+        // See note above about switching modes; we keep original semantics here.
         use_shared_mutex_ = false;
         shared_cross_mutex_ = nullptr;
     }
@@ -229,7 +231,7 @@ public:
 
     // Configure auto-purge behavior: interval (ms) and whether purge only when threshold exceeded.
     // interval_ms == 0 disables auto-purge.
-    void start_auto_purge(std::chrono::milliseconds interval, bool only_when_threshold_exceeded = false) {
+    void start_auto_purge(std::chrono::milliseconds interval, bool only_when_threshold_exceeded = true) {
         stop_auto_purge();
         if (interval.count() == 0) return;
         auto_purge_interval_ = interval;
@@ -272,7 +274,9 @@ public:
         auto lock = get_lock<UniqueLock>(bucket);
         // On insert we remove tombstone if present -> resurrect/replace the entry
         size_type erased = bucket.deleted_keys.erase(key);
-        if (erased) tombstone_count_.fetch_sub(1, std::memory_order_relaxed);
+        if (erased) {
+            tombstone_count_.fetch_sub(1, std::memory_order_relaxed);
+        }
         bucket.data[key] = value;
     }
 
@@ -292,7 +296,9 @@ public:
         else {
             // remove tombstone if present
             size_type erased = bucket.deleted_keys.erase(key);
-            if (erased) tombstone_count_.fetch_sub(1, std::memory_order_relaxed);
+            if (erased) {
+                tombstone_count_.fetch_sub(1, std::memory_order_relaxed);
+            }
             bucket.data[key] = value;
         }
     }
@@ -348,7 +354,9 @@ public:
     }
 
     // @brief Remove key from map (real deletion). If mark_only==true will only mark deleted (soft-delete)
-    bool erase(const Key& key, bool mark_only = false) {
+    // IMPORTANT (concurrency): when mark_only==true, we return true ONLY if we newly marked the key (tombstone inserted).
+    // If the key was already tombstoned by another thread, this returns false, preventing double counting.
+    bool erase(const Key& key, bool mark_only = true) {
         auto& bucket = get_bucket_for_key(key);
         auto lock = get_lock<UniqueLock>(bucket);
 
@@ -365,7 +373,8 @@ public:
                 tombstone_count_.fetch_add(1, std::memory_order_relaxed);
                 maybe_notify();
             }
-            return true;
+            // Return true ONLY if we actually transitioned to marked-deleted
+            return p.second;
         }
         else {
             // real deletion: remove from data and tombstones (if present)
@@ -465,7 +474,9 @@ public:
                     bucket.data.clear();
                     size_type removed = bucket.deleted_keys.size();
                     bucket.deleted_keys.clear();
-                    if (removed) tombstone_count_.fetch_sub(removed, std::memory_order_relaxed);
+                    if (removed) {
+                        tombstone_count_.fetch_sub(removed, std::memory_order_relaxed);
+                    }
                 }
             }
         }
@@ -484,7 +495,9 @@ public:
                     bucket.data.clear();
                     size_type removed = bucket.deleted_keys.size();
                     bucket.deleted_keys.clear();
-                    if (removed) tombstone_count_.fetch_sub(removed, std::memory_order_relaxed);
+                    if (removed) {
+                        tombstone_count_.fetch_sub(removed, std::memory_order_relaxed);
+                    }
                 }
             }
         }

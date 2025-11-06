@@ -28,17 +28,18 @@ void OrderCache::cancelOrder(const string& orderId) {
     const string& securityId = order.securityId();
     const string& user = order.user();
 
+    // Atomically mark-deleted first; if someone else already canceled, this returns false
+    if (!orders_.mark_deleted(orderId)) {
+        throw std::out_of_range("Order has been deleted: " + orderId);
+    }
+
     // Optimize security index removal O(1)
     ordersBySecurity_.erase_map(securityId, orderId);
 
     // Optimize user index removal
     ordersByUser_.erase_map(user, orderId);
-
-    // Remove from main storage last (for exception safety)
-    if (!orders_.erase(orderId)) {
-        throw std::out_of_range("Order has been deleted: " + orderId);
-    }
-    countCancelledOrders++;
+    
+    countCancelledOrders.fetch_add(1, memory_order::memory_order_relaxed);
 
 }
 

@@ -45,7 +45,9 @@ private:
         long total_errors{ 0 };
 		map<string, int> error_types;
         map<string, vector<microseconds>> latencies;
+		milliseconds total_duration{ 0 };
     };
+    map<int, vector<ThreadStats>> compare_stats;
 
 public:
     void runSafeBenchmark() {
@@ -58,7 +60,7 @@ public:
 
         for (int threads : thread_counts) {
             cout << "\n--- Testing with " << threads << " threads ---\n";
-            if (!runSingleBenchmark(threads, 5000)) {
+            if (!runSingleBenchmark(threads, 10000)) {
                 cout << "*** ERROR: Benchmark failed with " << threads << " threads ***\n";
                 success = false;
                 break;
@@ -73,8 +75,17 @@ public:
             cout << "\n*** Benchmark halted due to errors ***\n";
             runDebuggingTests();
         }
-    }
+		// To compare all stats after all runs
 
+		printComparisonStats();
+    }
+    void printComparisonStats() {
+        cout << "\n=== Comparison of Benchmark Stats ===\n";
+        for (const auto& [thread_count, stats_vec] : compare_stats) {
+            cout << "\n--- Stats for " << thread_count << " threads ---\n";
+            printSafeResults(stats_vec, thread_count);
+        }
+	}
 private:
     bool runSingleBenchmark(int num_threads, int operations_per_thread) {
         try {
@@ -124,6 +135,7 @@ private:
                 return false;
             }
 
+            compare_stats[num_threads] = stats;
             printSafeResults(stats, num_threads, cache.get());
             return true;
 
@@ -188,7 +200,7 @@ private:
         while (!start_flag.load() && !stop_requested_.load()) {
             this_thread::yield();
         }
-
+		auto total_start_time = high_resolution_clock::now();
         random_device rd;
         mt19937 gen(rd());
         uniform_int_distribution<> op_dist(0,3);
@@ -246,6 +258,8 @@ private:
                 this_thread::sleep_for(1ms);
             }
         }
+		auto total_end_time = high_resolution_clock::now();
+		stats.total_duration = duration_cast<milliseconds>(total_end_time - total_start_time);
     }
 
     void safeAddOperation(int thread_id, int op_id, OrderCache* cache, ThreadStats& stats, int company_, int sec_, int user_) {
@@ -390,9 +404,10 @@ private:
         }
     }
 
-    void printSafeResults(const vector<ThreadStats>& stats, int num_threads, OrderCache* cache) {
+    void printSafeResults(const vector<ThreadStats>& stats, int num_threads) {
         ThreadStats total;
         unordered_map<string, vector<microseconds>> all_latencies;
+
 
         for (const auto& s : stats) {
             total.add_ops += s.add_ops;
@@ -400,7 +415,55 @@ private:
             total.query_ops += s.query_ops;
             total.bulk_cancel_ops += s.bulk_cancel_ops;
             total.total_errors += s.total_errors;
-			total.error_types.insert(s.error_types.begin(), s.error_types.end());
+            total.error_types.insert(s.error_types.begin(), s.error_types.end());
+            total.total_duration = s.total_duration;
+            for (const auto& pair : s.latencies) {
+                all_latencies[pair.first].insert(all_latencies[pair.first].end(), pair.second.begin(), pair.second.end());
+            }
+        }
+
+        long total_ops = total.add_ops + total.cancel_ops + total.query_ops + total.bulk_cancel_ops;
+
+        cout << "\n=== SAFE BENCHMARK RESULTS ===\n";
+        cout << "Threads: " << num_threads << "\n";
+        cout << "Total Duration (ms): " << total.total_duration.count() << "\n";
+        cout << "Total Successfull Operations: " << total_ops << "\n";
+		cout << "Average operation time (us): " << (total.total_duration.count() * 1000.0 / total_ops) << "\n";
+
+        //Print latencies and operations per second
+        if (!all_latencies.empty()) {
+            for (const auto& pair : all_latencies) {
+                const auto& op_type = pair.first;
+                const auto& latencies = pair.second;
+                if (!latencies.empty()) {
+                    std::vector<microseconds> sorted_latencies = latencies;
+                    std::sort(sorted_latencies.begin(), sorted_latencies.end());
+                    auto min = sorted_latencies.front().count();
+                    auto max = sorted_latencies.back().count();
+                    auto median = sorted_latencies[sorted_latencies.size() / 2].count();
+                    auto p90 = sorted_latencies[sorted_latencies.size() * 9 / 10].count();
+                    cout << "Latency (" << op_type << ", us): Min=" << min
+                        << ", 50%=" << median
+                        << ", 90%=" << p90
+                        << ", Max=" << max << "\n";
+                }
+            }
+        }
+    }
+    
+    void printSafeResults(const vector<ThreadStats>& stats, int num_threads, OrderCache* cache) {
+        ThreadStats total;
+        unordered_map<string, vector<microseconds>> all_latencies;
+
+
+        for (const auto& s : stats) {
+            total.add_ops += s.add_ops;
+            total.cancel_ops += s.cancel_ops;
+            total.query_ops += s.query_ops;
+            total.bulk_cancel_ops += s.bulk_cancel_ops;
+            total.total_errors += s.total_errors;
+            total.error_types.insert(s.error_types.begin(), s.error_types.end());
+            total.total_duration = s.total_duration;
             for (const auto& pair : s.latencies) {
                 all_latencies[pair.first].insert(all_latencies[pair.first].end(), pair.second.begin(), pair.second.end());
             }
@@ -415,18 +478,19 @@ private:
         cout << "  - Cancel: " << total.cancel_ops << " (" << (total.cancel_ops * 100.0 / total_ops) << "%)\n";
         cout << "  - Query: " << total.query_ops << " (" << (total.query_ops * 100.0 / total_ops) << "%)\n";
         cout << "  - Bulk Cancel: " << total.bulk_cancel_ops << " (" << (total.bulk_cancel_ops * 100.0 / total_ops) << "%)\n";
-		size_t number_of_orders = cache->getAllOrders().size();
-		cout << "Verifying remaining orders in cache: " << number_of_orders << "\n";
-		cout << "Remaining Orders in Cache: " << total.add_ops + NumberOfPrePopulateOrders - cache->getCancelledOrdersCount() << endl;
-		cout << "Error Types:\n"; 
+        size_t number_of_orders = cache->getAllOrders().size();
+        cout << "Verifying remaining orders in cache: " << number_of_orders << "\n";
+        cout << "Remaining Orders in Cache: " << total.add_ops + NumberOfPrePopulateOrders - cache->getCancelledOrdersCount() << endl;
+        cout << "Error Types:\n";
         for (const auto& pair : total.error_types) {
             cout << "  - " << pair.first << ": " << pair.second << "\n";
-			total.total_errors += pair.second;
+            total.total_errors += pair.second;
         }
-        cout << "Errors: " << total.total_errors << " (" << (total.total_errors * 100.0 / (total_ops+total.total_errors)) << "%)\n";
+        cout << "Errors: " << total.total_errors << " (" << (total.total_errors * 100.0 / (total_ops + total.total_errors)) << "%)\n";
         cout << "Memory Errors: " << memory_errors_.load() << "\n";
+        cout << "Total Duration (ms): " << total.total_duration.count() << "\n";
 
-		//Print latencies and operations per second
+        //Print latencies and operations per second
         if (!all_latencies.empty()) {
             for (const auto& pair : all_latencies) {
                 const auto& op_type = pair.first;
