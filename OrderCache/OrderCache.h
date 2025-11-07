@@ -11,7 +11,7 @@
 using namespace std;
 
 template<typename Key, typename Value>
-using StripedMap = StripedThreadSafeMap<Key, Value, std::hash<Key>, shared_mutex, 2>;
+using StripedMap = StripedThreadSafeMap<Key, Value, std::hash<Key>, shared_mutex, 16>;
 
 class OrderCache : public OrderCacheInterface {
 private:

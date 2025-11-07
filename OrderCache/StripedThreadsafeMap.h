@@ -192,18 +192,21 @@ public:
     StripedThreadSafeMap() = default;
 
     // @brief Constructor with initializer list
+	// @param init Initializer list of key-value pairs to insert
     StripedThreadSafeMap(std::initializer_list<value_type> init) {
         for (const auto& pair : init) {
             insert(pair.first, pair.second);
         }
     }
 
-    // Enable/disable cross mutex
+    // @brief Enable/disable cross mutex
+	// @param shared_mutex Reference to external cross mutex
     explicit StripedThreadSafeMap(CrossMutexType& shared_mutex)
         : shared_cross_mutex_(&shared_mutex), use_shared_mutex_(true) {
     }
 
-    // Method to set shared mutex
+    // @brief Method to set shared mutex
+	// @param shared_mutex Reference to external cross mutex
     void set_shared_cross_mutex(CrossMutexType& shared_mutex) {
         // NOTE: switching modes while other threads are active can be sensitive;
         // if needed, acquire all bucket locks here before flipping (omitted to match original semantics).
@@ -211,12 +214,14 @@ public:
         use_shared_mutex_ = true;
     }
 
+	// @brief Clear shared cross mutex usage
     void clear_shared_cross_mutex() {
         // See note above about switching modes; we keep original semantics here.
         use_shared_mutex_ = false;
         shared_cross_mutex_ = nullptr;
     }
 
+	// @brief Check if shared cross mutex is enabled
     bool is_shared_cross_mutex_enabled() const {
         return use_shared_mutex_ && shared_cross_mutex_ != nullptr;
     }
@@ -224,13 +229,16 @@ public:
     // ----------------------------
     // Purge policy & notification control
     // ----------------------------
-    // Set the threshold for purging. If >0 you may enable threshold-driven auto-purge.
+    // @brief Set the threshold for purging. If >0 you may enable threshold-driven auto-purge.
+	// @param threshold Number of tombstones to trigger purge
     void set_purge_threshold(size_type threshold) {
         purge_threshold_.store(threshold, std::memory_order_relaxed);
     }
 
-    // Configure auto-purge behavior: interval (ms) and whether purge only when threshold exceeded.
+    // @brief Configure auto-purge behavior: interval (ms) and whether purge only when threshold exceeded.
     // interval_ms == 0 disables auto-purge.
+	// @param interval Purge interval in milliseconds
+	// @param only_when_threshold_exceeded If true, purge only when threshold exceeded
     void start_auto_purge(std::chrono::milliseconds interval, bool only_when_threshold_exceeded = true) {
         stop_auto_purge();
         if (interval.count() == 0) return;
@@ -240,6 +248,7 @@ public:
         auto_purge_thread_ = std::thread([this] { this->auto_purge_loop(); });
     }
 
+	// @brief Stop auto-purge thread if running
     void stop_auto_purge() {
         if (!auto_purge_running_.load()) return;
         {
@@ -250,14 +259,17 @@ public:
         if (auto_purge_thread_.joinable()) auto_purge_thread_.join();
     }
 
-    // Configure a notification callback and threshold. If threshold==0 any positive tombstone_count triggers notification.
+    // @brief Configure a notification callback and threshold. If threshold==0 any positive tombstone_count triggers notification.
     // The callback is invoked asynchronously (detached thread).
+	// @param cb Callback function taking current tombstone count
+	// @param notify_threshold Threshold to trigger notification
     void set_tombstone_notify(std::function<void(size_type)> cb, size_type notify_threshold = 0) {
         std::lock_guard<std::mutex> lk(callback_mutex_);
         tombstone_notify_callback_ = std::move(cb);
         notification_threshold_.store(notify_threshold, std::memory_order_relaxed);
     }
 
+	// @brief Clear notification callback
     void clear_tombstone_notify() {
         std::lock_guard<std::mutex> lk(callback_mutex_);
         tombstone_notify_callback_ = nullptr;
@@ -268,7 +280,10 @@ public:
     // Core operations (soft-delete support)
     // ----------------------------
 
-    // @brief Insert or update a key-value pair (real insertion/unmark if previously marked)
+    // @brief Insert or update a key-value pair (real insertion/unmark if previously marked).
+	// On insert we remove tombstone if present -> resurrect/replace the entry
+	// @param key Key to insert/update
+	// @param value Value to insert/update
     void insert(const Key& key, const Value& value) {
         auto& bucket = get_bucket_for_key(key);
         auto lock = get_lock<UniqueLock>(bucket);
@@ -280,7 +295,13 @@ public:
         bucket.data[key] = value;
     }
 
-    // @brief Insert or update a key-value pair specialized for container-like values (merging), unmarks if present
+    // @brief Insert or update a key-value pair specialized for container-like values (merging), unmarks if present.
+    //  Assumes Value supports insert(begin, end) method (e.g., std::vector, std::unordered_set)
+	// @param key Key to insert/update
+	// @param value Container-like Value to merge/insert
+	// @param capacity Initial capacity for container if newly created
+	// @param load_factor Load factor for container if newly created to avoid rehashes
+	// Default capacity and load factor can be specified for initial allocation
     void insert_list(const Key& key, const Value& value, int capacity = 10000, float load_factor = 0.7F) {
         auto& bucket = get_bucket_for_key(key);
         auto lock = get_lock<UniqueLock>(bucket);
@@ -304,6 +325,8 @@ public:
     }
 
     // @brief Emplace a key-value pair (unmarks if present)
+	// @param key Key to emplace/update
+	// @param args Arguments to forward to Value constructor
     template<typename... Args>
     void emplace(const Key& key, Args&&... args) {
         auto& bucket = get_bucket_for_key(key);
@@ -319,6 +342,9 @@ public:
     }
 
     // @brief Try to emplace a key-value pair or update if mark deleted
+	// @param key Key to emplace/update
+	// @param args Arguments to forward to Value constructor
+	// @return true if newly inserted, false if key already existed and was not marked deleted
     template<typename... Args>
     bool try_emplace(const Key& key, Args&&... args) {
         auto& bucket = get_bucket_for_key(key);
@@ -334,7 +360,8 @@ public:
     }
 
     // @brief Get value for key with bounds checking (const version)
-    // Returns Value{} when not found or marked deleted.
+	// @param key Key to lookup
+    // @return Returns Value{} when not found or marked deleted.
     const Value at(const Key& key) const {
         auto& bucket = get_bucket_for_key(key);
         auto lock = get_lock<std::shared_lock<CrossMutexType>>(bucket);
@@ -346,6 +373,8 @@ public:
     }
 
     // @brief Check if key exists and is not marked deleted
+	// @param key Key to check
+	// @return true if key exists and is not marked deleted
     bool contains(const Key& key) const {
         auto& bucket = get_bucket_for_key(key);
         auto lock = get_lock<std::shared_lock<CrossMutexType>>(bucket);
