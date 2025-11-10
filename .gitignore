@@ -3,6 +3,16 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/master/VisualStudio.gitignore
 
+# Test executables
+test_runner
+*_test
+*_benchmark
+
+# Generated code
+tools/generated/
+tools/command_definition.yaml
+tools/command_definition.json
+
 # User-specific files
 *.rsuser
 *.suo

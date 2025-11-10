@@ -1,0 +1,62 @@
+{# Implementation Template for Add Commands #}
+{# Usage: Generates implementation for adding entities #}
+{{ return_type }} OrderCache::{{ method_name }}(
+    {%- for param in parameters -%}
+    {%- if param.pass_by == 'const_ref' -%}
+    const {{ param.type }}& {{ param.name }}
+    {%- elif param.pass_by == 'ref' -%}
+    {{ param.type }}& {{ param.name }}
+    {%- else -%}
+    {{ param.type }} {{ param.name }}
+    {%- endif -%}
+    {%- if not loop.last %}, {% endif -%}
+    {%- endfor -%}
+){% if is_const %} const{% endif %} {
+    {%- if command_type == 'add' %}
+    const string& {{ id_field }} = {{ parameters[0].name }}.{{ id_field }}();
+    
+    // Add to main storage with duplicate check
+    if (!(orders_.try_emplace({{ id_field }}, {{ parameters[0].name }})).second) {
+        throw invalid_argument("Duplicate {{ entity }} ID: " + {{ id_field }});
+    }
+    
+    {%- for index in indexes %}
+    // Update {{ index }} index
+    auto& {{ index|replace('ordersBy', '')|replace('_', '')|lower }}Set = {{ index }}[{{ parameters[0].name }}.{{ index|replace('ordersBy', '')|replace('_', '')|lower }}()];
+    if ({{ index|replace('ordersBy', '')|replace('_', '')|lower }}Set.empty()) {
+        {{ index|replace('ordersBy', '')|replace('_', '')|lower }}Set.reserve(10000);
+        {{ index|replace('ordersBy', '')|replace('_', '')|lower }}Set.max_load_factor(0.7F);
+    }
+    {{ index|replace('ordersBy', '')|replace('_', '')|lower }}Set.insert({{ id_field }});
+    {% endfor %}
+    {%- elif command_type == 'delete' %}
+    // Find order
+    auto orderIt = orders_.find({{ parameters[0].name }});
+    if (orderIt == orders_.end()) {
+        throw out_of_range("{{ entity }} ID not found: " + {{ parameters[0].name }});
+    }
+    
+    const Order& order = orderIt->second;
+    
+    // TODO: Remove from all indexes
+    
+    // Remove from main storage
+    orders_.erase(orderIt);
+    {%- elif command_type == 'query' %}
+    // TODO: Implement query logic
+    {%- if 'vector' in return_type %}
+    {{ return_type }} result;
+    result.reserve(orders_.size());
+    
+    for (const auto& [id, order] : orders_) {
+        result.push_back(order);
+    }
+    
+    return result;
+    {%- else %}
+    return 0;  // TODO: Implement
+    {%- endif %}
+    {%- else %}
+    // TODO: Implement custom logic
+    {%- endif %}
+}
