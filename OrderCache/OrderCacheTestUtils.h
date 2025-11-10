@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+
 void runExample1Tests();
 void runExample2Tests();
 void runExample3Tests();
