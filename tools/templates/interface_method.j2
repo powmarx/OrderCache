@@ -1,0 +1,14 @@
+{# Interface Method Template #}
+{# Usage: Generates interface method declaration #}
+    virtual {{ return_type }} {{ method_name }}(
+        {%- for param in parameters -%}
+        {%- if param.pass_by == 'const_ref' -%}
+        const {{ param.type }}& {{ param.name }}
+        {%- elif param.pass_by == 'ref' -%}
+        {{ param.type }}& {{ param.name }}
+        {%- else -%}
+        {{ param.type }} {{ param.name }}
+        {%- endif -%}
+        {%- if not loop.last %}, {% endif -%}
+        {%- endfor -%}
+    ){% if is_const %} const{% endif %} = 0;
