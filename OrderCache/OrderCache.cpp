@@ -16,7 +16,7 @@ void OrderCache::addOrder(Order order) {
 
     // Update indexes with collision mitigation
     ordersBySecurity_.insert_list(securityId, { orderId });
-    ordersByUser_.insert_list(user, {orderId}, 5000);
+    ordersByUser_.insert_list(user, { orderId }, 5000);
 }
 
 void OrderCache::cancelOrder(const string& orderId) {
@@ -49,7 +49,9 @@ void OrderCache::cancelOrdersForUser(const string& user) {
     }
 
     // Get copy of order IDs to avoid modifying while iterating
-	const auto orderIds = ordersByUser_.at(user);
+	const auto orderIds_opt = ordersByUser_.at_opt(user);
+    const auto orderIds = orderIds_opt.value();
+
 
     // Remove each order using the existing cancelOrder logic
     for (const string& orderId : orderIds) {
@@ -64,14 +66,13 @@ void OrderCache::cancelOrdersForSecIdWithMinimumQty(const string& securityId, un
         throw out_of_range("Security ID not found: " + securityId);
     }
 
-    const auto orderIds = ordersBySecurity_.at(securityId);
+    const auto orderIds = ordersBySecurity_.at_opt(securityId);
 
 
-    for (const string& orderId : orderIds) {
-        if (orders_.contains(orderId)) {
-			const auto& order = orders_.at(orderId);
-
-            if (order.qty() >= minQty) {
+    for (const string& orderId : orderIds.value()) {
+        const auto& order = orders_.at_opt(orderId);
+        if (order != nullopt) {
+            if (order.value().qty() >= minQty) {
 
                 cancelOrder(orderId); // Reuse existing method for consistency and safety
 
@@ -86,7 +87,8 @@ unsigned int OrderCache::getMatchingSizeForSecurity(const string& securityId) {
         return 0;
     }
 
-    const auto orderIds = ordersBySecurity_.at(securityId);
+    const auto orderIds_opt = ordersBySecurity_.at_opt(securityId);
+    const auto orderIds     = orderIds_opt.value();
 
     unordered_map<string, unsigned int> buyQtyPerCompany;
     unordered_map<string, unsigned int> sellQtyPerCompany;

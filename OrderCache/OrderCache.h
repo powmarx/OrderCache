@@ -11,7 +11,7 @@
 using namespace std;
 
 template<typename Key, typename Value>
-using StripedMap = StripedThreadSafeMap<Key, Value, std::hash<Key>, shared_mutex, 16>;
+using StripedMap = StripedThreadSafeMap<Key, Value, std::hash<Key>, shared_mutex, 8>;
 
 class OrderCache : public OrderCacheInterface {
 private:
@@ -23,11 +23,11 @@ private:
 	// Indexes for efficient queries
     StripedMap<string, unordered_set<string>> ordersBySecurity_;
     StripedMap<string, unordered_set<string>> ordersByUser_;
-
     atomic<int> countCancelledOrders{ 0 };
 public:
     OrderCache() {
-		orders_.set_shared_cross_mutex(mutex_);
+		size_t stripes_ = thread::hardware_concurrency();
+        orders_.set_shared_cross_mutex(mutex_);
 		ordersBySecurity_.set_shared_cross_mutex(mutex_);
 		ordersByUser_.set_shared_cross_mutex(mutex_);
 		const StripedMap<string, Order>::size_type initial_tombstones = 100000;

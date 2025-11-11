@@ -29,6 +29,7 @@ private:
         {2, "GetMatchingSizeForSecurity"},
         {3, "CancelOrdersForUser"},
         {4, "CancelOrdersForSecIdWithMinimumQty" },
+        {5, "No Operation"},
     };
     enum OperationType : int{
         AddOrder                            = 0,
@@ -36,6 +37,7 @@ private:
         GetMatchingSizeForSecurity          = 2,
         CancelOrdersForUser                 = 3,
 		CancelOrdersForSecIdWithMinimumQty  = 4,
+        NoOp                                = 5,
 	};
     struct ThreadStats {
         long add_ops{ 0 };
@@ -46,6 +48,7 @@ private:
 		map<string, int> error_types;
         map<string, vector<microseconds>> latencies;
 		milliseconds total_duration{ 0 };
+		long noop_count{ 0 };
     };
     map<int, vector<ThreadStats>> compare_stats;
 
@@ -303,6 +306,11 @@ private:
                 stats.error_types[operation_names_[OperationType::CancelOrder]]++;
             }
         }
+        else
+        {
+			stats.noop_count++;
+			stats.error_types[operation_names_[OperationType::NoOp]]++;
+        }
     }
 
     void safeBulkOperation(OrderCache* cache, ThreadStats& stats, int user_num, int sec_num, int qty_) {
@@ -330,6 +338,11 @@ private:
                 // Expected - security might not exist
                 stats.error_types[operation_names_[OperationType::CancelOrdersForSecIdWithMinimumQty]]++;
             }
+        }
+        else
+        {
+            stats.noop_count++;
+			stats.error_types[operation_names_[OperationType::NoOp]]++;
         }
     }
 
@@ -417,6 +430,7 @@ private:
             total.total_errors += s.total_errors;
             total.error_types.insert(s.error_types.begin(), s.error_types.end());
             total.total_duration = s.total_duration;
+			total.noop_count = s.noop_count;
             for (const auto& pair : s.latencies) {
                 all_latencies[pair.first].insert(all_latencies[pair.first].end(), pair.second.begin(), pair.second.end());
             }
@@ -429,6 +443,7 @@ private:
         cout << "Total Duration (ms): " << total.total_duration.count() << "\n";
         cout << "Total Successfull Operations: " << total_ops << "\n";
 		cout << "Average operation time (us): " << (total.total_duration.count() * 1000.0 / total_ops) << "\n";
+		cout << "No Op count: " << total.noop_count << "\n";
 
         //Print latencies and operations per second
         if (!all_latencies.empty()) {
@@ -464,6 +479,7 @@ private:
             total.total_errors += s.total_errors;
             total.error_types.insert(s.error_types.begin(), s.error_types.end());
             total.total_duration = s.total_duration;
+            total.noop_count = s.noop_count;
             for (const auto& pair : s.latencies) {
                 all_latencies[pair.first].insert(all_latencies[pair.first].end(), pair.second.begin(), pair.second.end());
             }
@@ -486,6 +502,7 @@ private:
             cout << "  - " << pair.first << ": " << pair.second << "\n";
             total.total_errors += pair.second;
         }
+        cout << "No operation count: " << total.noop_count << endl;
         cout << "Errors: " << total.total_errors << " (" << (total.total_errors * 100.0 / (total_ops + total.total_errors)) << "%)\n";
         cout << "Memory Errors: " << memory_errors_.load() << "\n";
         cout << "Total Duration (ms): " << total.total_duration.count() << "\n";

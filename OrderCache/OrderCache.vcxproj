@@ -140,6 +140,9 @@
     <ClInclude Include="OrderCacheTestUtils.h" />
     <ClInclude Include="StripedThreadsafeMap.h" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="StripedThreadSafeMap_impl.inl" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
