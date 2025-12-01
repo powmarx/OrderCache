@@ -24,7 +24,11 @@ void OrderCache::cancelOrder(const string& orderId) {
     if (!orders_.contains(orderId)) {
         throw out_of_range("Order ID not found: " + orderId);
     }
-    const auto order = orders_.at(orderId);
+    const auto order_opt = orders_.at_opt(orderId);
+    if (order_opt == nullopt) {
+        throw out_of_range("Order ID not found: " + orderId + " in getting order.");
+    }
+	const auto order = order_opt.value();
     const string& securityId = order.securityId();
     const string& user = order.user();
 
@@ -50,8 +54,12 @@ void OrderCache::cancelOrdersForUser(const string& user) {
 
     // Get copy of order IDs to avoid modifying while iterating
 	const auto orderIds_opt = ordersByUser_.at_opt(user);
-    const auto orderIds = orderIds_opt.value();
 
+	// For thread safety, check if nullopt
+    if (orderIds_opt == nullopt) {
+        throw out_of_range("User ID not found: " + user + " in getting order id.");
+    }
+    const auto orderIds = orderIds_opt.value();
 
     // Remove each order using the existing cancelOrder logic
     for (const string& orderId : orderIds) {
@@ -68,6 +76,10 @@ void OrderCache::cancelOrdersForSecIdWithMinimumQty(const string& securityId, un
 
     const auto orderIds = ordersBySecurity_.at_opt(securityId);
 
+	// For thread safety, check if nullopt
+    if (orderIds == nullopt) {
+        throw out_of_range("Security ID not found: " + securityId + " in getting order id.");
+    }
 
     for (const string& orderId : orderIds.value()) {
         const auto& order = orders_.at_opt(orderId);
@@ -88,6 +100,12 @@ unsigned int OrderCache::getMatchingSizeForSecurity(const string& securityId) {
     }
 
     const auto orderIds_opt = ordersBySecurity_.at_opt(securityId);
+	
+    //For thread safety, check if nullopt
+    if(orderIds_opt == nullopt) {
+        return 0;
+	}
+    
     const auto orderIds     = orderIds_opt.value();
 
     unordered_map<string, unsigned int> buyQtyPerCompany;

@@ -202,7 +202,8 @@ void StripedThreadSafeMap<Key, Value, Hash, CrossMutexType, StripeCount>::set_pu
 }
 
 template<typename Key, typename Value, typename Hash, typename CrossMutexType, size_t StripeCount>
-void StripedThreadSafeMap<Key, Value, Hash, CrossMutexType, StripeCount>::start_auto_purge(
+void StripedThreadSafeMap<Key, Value, Hash, CrossMutexType, StripeCount>::
+start_auto_purge(
     std::chrono::milliseconds interval, bool only_when_threshold_exceeded) {
     stop_auto_purge();
     if (interval.count() == 0) return;
@@ -213,7 +214,8 @@ void StripedThreadSafeMap<Key, Value, Hash, CrossMutexType, StripeCount>::start_
 }
 
 template<typename Key, typename Value, typename Hash, typename CrossMutexType, size_t StripeCount>
-void StripedThreadSafeMap<Key, Value, Hash, CrossMutexType, StripeCount>::stop_auto_purge() {
+void StripedThreadSafeMap<Key, Value, Hash, CrossMutexType, StripeCount>::
+stop_auto_purge() {
     if (!auto_purge_running_.load()) return;
     {
         std::lock_guard<std::mutex> lk(auto_purge_control_mutex_);

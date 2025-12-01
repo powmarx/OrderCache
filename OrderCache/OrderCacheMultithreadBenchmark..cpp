@@ -40,6 +40,7 @@ private:
         NoOp                                = 5,
 	};
     struct ThreadStats {
+		int thread_id{ -1 };
         long add_ops{ 0 };
         long cancel_ops{ 0 };
         long query_ops{ 0 };
@@ -48,7 +49,6 @@ private:
 		map<string, int> error_types;
         map<string, vector<microseconds>> latencies;
 		milliseconds total_duration{ 0 };
-		long noop_count{ 0 };
     };
     map<int, vector<ThreadStats>> compare_stats;
 
@@ -58,12 +58,12 @@ public:
         cout << "This version includes memory safety checks and debugging\n";
 
         // Test with conservative thread counts first
-        vector<int> thread_counts = { 1, 2, 4, 8, 16};
+        vector<int> thread_counts = { 2, 4, 8, 16};
         bool success = true;
 
         for (int threads : thread_counts) {
             cout << "\n--- Testing with " << threads << " threads ---\n";
-            if (!runSingleBenchmark(threads, 10000)) {
+            if (!runSingleBenchmark(threads, 1000000)) {
                 cout << "*** ERROR: Benchmark failed with " << threads << " threads ***\n";
                 success = false;
                 break;
@@ -211,12 +211,14 @@ private:
         uniform_int_distribution<> qty_dist(100, 1000);
         uniform_int_distribution<> user_dist(1, 500);
         uniform_int_distribution<> cpny_dist(1, 100);
+		stats.thread_id = thread_id;
+		int operation = 0;
 
 //        stats.latencies. reserve(operations);
         for (int i = 0; i < operations && !stop_requested_.load(); i++) {
             auto start_time = high_resolution_clock::now();
             try {
-                int operation = op_dist(gen);
+                operation = op_dist(gen);
                 switch (operation) {
                 case 0: // Safe add operation
                     safeAddOperation(thread_id, i, cache, stats, cpny_dist(gen), sec_dist(gen), user_dist(gen));
@@ -242,7 +244,7 @@ private:
 
                 // Log first few errors
                 if (stats.total_errors <= 3) {
-                    cout << "Thread " << thread_id << " error: " << e.what() << "\n";
+                    cout << "Thread " << thread_id << " Op: " << operation << " error: " << e.what() << "\n";
                 }
             }
             catch (...) {
@@ -250,7 +252,7 @@ private:
                 memory_errors_++;
 
                 if (stats.total_errors <= 3) {
-                    cout << "Thread " << thread_id << " unknown error\n";
+                    cout << "Thread " << thread_id <<  " Op: " << operation <<" unknown error\n";
                 }
             }
 
@@ -308,7 +310,6 @@ private:
         }
         else
         {
-			stats.noop_count++;
 			stats.error_types[operation_names_[OperationType::NoOp]]++;
         }
     }
@@ -341,7 +342,6 @@ private:
         }
         else
         {
-            stats.noop_count++;
 			stats.error_types[operation_names_[OperationType::NoOp]]++;
         }
     }
@@ -428,9 +428,10 @@ private:
             total.query_ops += s.query_ops;
             total.bulk_cancel_ops += s.bulk_cancel_ops;
             total.total_errors += s.total_errors;
-            total.error_types.insert(s.error_types.begin(), s.error_types.end());
+            for (const auto& pair : s.error_types) {
+                total.error_types[pair.first] += pair.second;
+            }
             total.total_duration = s.total_duration;
-			total.noop_count = s.noop_count;
             for (const auto& pair : s.latencies) {
                 all_latencies[pair.first].insert(all_latencies[pair.first].end(), pair.second.begin(), pair.second.end());
             }
@@ -443,7 +444,6 @@ private:
         cout << "Total Duration (ms): " << total.total_duration.count() << "\n";
         cout << "Total Successfull Operations: " << total_ops << "\n";
 		cout << "Average operation time (us): " << (total.total_duration.count() * 1000.0 / total_ops) << "\n";
-		cout << "No Op count: " << total.noop_count << "\n";
 
         //Print latencies and operations per second
         if (!all_latencies.empty()) {
@@ -477,9 +477,10 @@ private:
             total.query_ops += s.query_ops;
             total.bulk_cancel_ops += s.bulk_cancel_ops;
             total.total_errors += s.total_errors;
-            total.error_types.insert(s.error_types.begin(), s.error_types.end());
+            for (const auto& pair : s.error_types) {
+				total.error_types[pair.first] += pair.second;
+            }
             total.total_duration = s.total_duration;
-            total.noop_count = s.noop_count;
             for (const auto& pair : s.latencies) {
                 all_latencies[pair.first].insert(all_latencies[pair.first].end(), pair.second.begin(), pair.second.end());
             }
@@ -502,7 +503,6 @@ private:
             cout << "  - " << pair.first << ": " << pair.second << "\n";
             total.total_errors += pair.second;
         }
-        cout << "No operation count: " << total.noop_count << endl;
         cout << "Errors: " << total.total_errors << " (" << (total.total_errors * 100.0 / (total_ops + total.total_errors)) << "%)\n";
         cout << "Memory Errors: " << memory_errors_.load() << "\n";
         cout << "Total Duration (ms): " << total.total_duration.count() << "\n";
