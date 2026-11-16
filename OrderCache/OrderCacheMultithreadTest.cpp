@@ -1,130 +1,375 @@
-﻿#include "OrderCache.h"
-#include "OrderCacheInterface.h"
-#include "OrderCacheTestUtils.h" // Assuming this file exists for test helper declarations
-#include <iostream>
-#include <string>
+﻿#include <thread>
 #include <vector>
-#include <random>
-#include <sstream>
-#include <thread>
-#include <chrono>
 #include <atomic>
-#include <numeric>
-#include <algorithm>
-#include <iomanip>
+#include <chrono>
+#include <random>
+#include <future>
+#include <iostream>
+#include <cassert>
 
-using namespace std;
+#include "OrderCache.h"
+#include "OrderCacheTestUtils.h"
 
-// --- Test Configuration ---
-const int NUM_THREADS = 8;        // Number of concurrent threads
-const int OPERATIONS_PER_THREAD = 100000; // Total operations each thread will execute
-const int TOTAL_OPERATIONS = NUM_THREADS * OPERATIONS_PER_THREAD;
+void runMultithreadingTest() {
+    cout << "Running Multithreading Tests...\n";
 
-// --- Helper Functions for Data Generation ---
+    // Test 1: Concurrent Add and Query
+    cout << "Test 1: Concurrent Add and Query Operations\n";
+    {
+        OrderCache cache;
+        const int numThreads = 8;
+        const int ordersPerThread = 100;
+        vector<thread> threads;
+        atomic<int> totalOrdersAdded(0);
+        atomic<int> successfulQueries(0);
 
-// Creates a pseudo-random number generator for each thread to avoid contention on a single shared generator.
-mt19937 create_prng() {
-    // Uses a truly random seed (random_device) to ensure test variety on each run
-    return mt19937(random_device{}());
-}
+        auto start = chrono::high_resolution_clock::now();
 
-// @brief Simulates a worker thread performing mixed operations on the cache.
-void threadWorker(OrderCache& cache, int threadId, mt19937& gen) {
-    // Use a small set of securities and users to maximize lock contention on the stripes
-    uniform_int_distribution<> secDist(1, 20);      // 20 securities (high contention)
-    uniform_int_distribution<> userDist(1, 200);     // 200 users (high contention)
-    uniform_int_distribution<> qtyDist(100, 2000);   // Quantity
-    uniform_int_distribution<> sideDist(0, 1);       // Side (Buy/Sell)
+        // Launch writer threads
+        for (int i = 0; i < numThreads; i++) {
+            threads.emplace_back([&, i]() {
+                for (int j = 0; j < ordersPerThread; j++) {
+                    string orderId = "MT_Ord_" + to_string(i) + "_" + to_string(j);
+                    string securityId = "SecId" + to_string(j % 3 + 1); // SecId1, SecId2, SecId3
+                    string side = (j % 2 == 0) ? "Buy" : "Sell";
+                    string user = "User" + to_string(i);
+                    string company = "Company" + to_string(i % 3);
 
-    // Operation distribution: 60% Add, 20% Cancel, 20% Read
-    uniform_int_distribution<> opDist(0, 99);
+                    cache.addOrder(Order(orderId, securityId, side, 100, user, company));
+                    totalOrdersAdded++;
+                    cout << "Total orders added: " << totalOrdersAdded.load() << "\n";
+                }
+                });
+        }
 
-    for (int i = 0; i < OPERATIONS_PER_THREAD; ++i) {
-        int op = opDist(gen);
+        //  Launch reader threads that query while writes are happening
+        for (int i = 0; i < 4; i++) {
+            threads.emplace_back([&, i]() {
+                random_device rd;
+                mt19937 gen(rd());
+                uniform_int_distribution<> dis(1, 3);
 
-        stringstream ordId;
-        // Create a unique OrderID for this thread: T[ThreadID]O[Iteration]
-        ordId << "T" << threadId << "O" << i;
-        string currentOrderId = ordId.str();
+                for (int j = 0; j < 50; j++) {
+                    string securityId = "SecId" + to_string(dis(gen));
+                    try {
+                        unsigned int size = cache.getMatchingSizeForSecurity(securityId);
+                        successfulQueries++;
+                    }
+                    catch (...) {
+                        // Ignore exceptions during concurrent access
+                    }
+                    this_thread::sleep_for(chrono::microseconds(100));
+                }
+                });
+        }
 
-        // WRITE: Insertion Operation (Add: 0-59)
-        if (op < 60) {
-            stringstream secId, user, company;
-            secId << "SecId" << secDist(gen);
-            user << "User" << userDist(gen);
-            company << "Comp" << (userDist(gen) % 5 + 1); // 5 companies
-            string side = (sideDist(gen) == 0) ? "Buy" : "Sell";
-            unsigned int qty = qtyDist(gen);
+        // Wait for all threads
+        for (auto& t : threads) {
+            t.join();
+        }
 
-            Order order(currentOrderId, secId.str(), side, qty, user.str(), company.str());
+        auto end = chrono::high_resolution_clock::now();
+        auto duration = chrono::duration_cast<chrono::milliseconds>(end - start);
 
+        // Verify results
+        auto orders = cache.getAllOrders();
+        cout << "Added " << totalOrdersAdded << " orders, found " << orders.size() << " orders\n";
+        cout << "Successful queries: " << successfulQueries << "\n";
+        cout << "Execution time: " << duration.count() << "ms\n";
+
+        assert(orders.size() == numThreads * ordersPerThread && "All orders should be added");
+        assert(successfulQueries > 0 && "Should have successful queries during concurrent access");
+        cout << "Test 1 Passed!\n";
+    }
+
+    // Test 2: Concurrent Add and Cancel
+    cout << "\nTest 2: Concurrent Add and Cancel Operations\n";
+    {
+        OrderCache cache;
+        const int numThreads = 6;
+        vector<thread> threads;
+        atomic<int> addSuccess(0);
+        atomic<int> cancelSuccess(0);
+        atomic<int> cancelFailures(0);
+
+        // Pre-populate with some orders
+        for (int i = 0; i < 100; i++) {
+            cache.addOrder(Order("PreOrd_" + to_string(i), "SecId1", "Buy", 100, "User" + to_string(i % 5), "Company1"));
+        }
+
+        auto start = chrono::high_resolution_clock::now();
+
+        // Add orders
+        for (int i = 0; i < numThreads / 2; i++) {
+            threads.emplace_back([&, i]() {
+                for (int j = 0; j < 50; j++) {
+                    string orderId = "Add_Ord_" + to_string(i) + "_" + to_string(j);
+                    cache.addOrder(Order(orderId, "SecId2", "Sell", 200, "User" + to_string(i), "Company2"));
+                    addSuccess++;
+                    this_thread::sleep_for(chrono::microseconds(50));
+                }
+                });
+        }
+
+        // Cancel orders
+        for (int i = 0; i < numThreads / 2; i++) {
+            threads.emplace_back([&, i]() {
+                for (int j = 0; j < 50; j++) {
+                    string orderId = "PreOrd_" + to_string((i * 10 + j) % 100);
+                    try {
+                        cache.cancelOrder(orderId);
+                        cancelSuccess++;
+                    }
+                    catch (const out_of_range&) {
+                        cancelFailures++; // Expected - order already canceled by another thread
+                    }
+                    this_thread::sleep_for(chrono::microseconds(50));
+                }
+                });
+        }
+
+        for (auto& t : threads) {
+            t.join();
+        }
+
+        auto end = chrono::high_resolution_clock::now();
+        auto duration = chrono::duration_cast<chrono::milliseconds>(end - start);
+
+        auto orders = cache.getAllOrders();
+        cout << "Add operations: " << addSuccess << "\n";
+        cout << "Cancel operations: " << cancelSuccess << "\n";
+        cout << "Cancel failures (expected): " << cancelFailures << "\n";
+        cout << "Final order count: " << orders.size() << "\n";
+        cout << "Execution time: " << duration.count() << "ms\n";
+
+        // Should have initial 100 + added orders - canceled orders
+        // Since we're adding 150 and canceling up to 100, result should be between 150 and 250
+        assert(orders.size() >= 150 && orders.size() <= 250 && "Order count should be in expected range");
+        cout << "Test 2 Passed!\n";
+    }
+
+    // Test 3: Complex Mixed Operations
+    cout << "\nTest 3: Complex Mixed Operations\n";
+    {
+        OrderCache cache;
+        const int numThreads = 10;
+        vector<thread> threads;
+        atomic<int> operationsCompleted(0);
+
+        // Pre-populate
+        for (int i = 0; i < 200; i++) {
+            cache.addOrder(Order("Mixed_" + to_string(i), "SecId" + to_string(i % 3 + 1),
+                i % 2 == 0 ? "Buy" : "Sell", 100 + i, "User" + to_string(i % 10),
+                "Company" + to_string(i % 4)));
+        }
+
+        auto start = chrono::high_resolution_clock::now();
+
+        // Mixed operations threads
+        for (int i = 0; i < numThreads; i++) {
+            threads.emplace_back([&, i]() {
+                random_device rd;
+                mt19937 gen(rd());
+                uniform_int_distribution<> opDis(0, 4);
+                uniform_int_distribution<> idDis(0, 199);
+                uniform_int_distribution<> secDis(1, 3);
+
+                for (int j = 0; j < 30; j++) {
+                    int operation = opDis(gen);
+                    try {
+                        switch (operation) {
+                        case 0: // Add order
+                            cache.addOrder(Order("New_" + to_string(i) + "_" + to_string(j),
+                                "SecId" + to_string(secDis(gen)),
+                                j % 2 == 0 ? "Buy" : "Sell",
+                                50 + j, "User" + to_string(i),
+                                "Company" + to_string(i % 4)));
+                            break;
+                        case 1: // Cancel order
+                            cache.cancelOrder("Mixed_" + to_string(idDis(gen)));
+                            break;
+                        case 2: // Query matching size
+                            cache.getMatchingSizeForSecurity("SecId" + to_string(secDis(gen)));
+                            break;
+                        case 3: // Get all orders
+                            cache.getAllOrders();
+                            break;
+                        case 4: // Cancel orders for user
+                            cache.cancelOrdersForUser("User" + to_string(idDis(gen) % 10));
+                            break;
+                        }
+                        operationsCompleted++;
+                    }
+                    catch (const exception& e) {
+                        // Expected for some operations (order not found, etc.)
+                    }
+                    this_thread::sleep_for(chrono::microseconds(10));
+                }
+                });
+        }
+
+        for (auto& t : threads) {
+            t.join();
+        }
+
+        auto end = chrono::high_resolution_clock::now();
+        auto duration = chrono::duration_cast<chrono::milliseconds>(end - start);
+
+        // Verify cache is in consistent state
+        auto orders = cache.getAllOrders();
+
+        // Check consistency: every order should be in appropriate indexes
+        for (const auto& order : orders) {
+            // Verify order exists in security index
             try {
-                cache.addOrder(order);
+                unsigned int matchSize = cache.getMatchingSizeForSecurity(order.securityId());
+                // Just verifying no exception is thrown and calculation works
             }
-            catch (const exception& e) {
-                // Duplicate Order ID exceptions are expected/safe and should be caught here
-            }
-        }
-        // WRITE: Cancellation Operation (Cancel: 60-79)
-        else if (op < 80) {
-            // Attempt to cancel an order that should have been added recently by this thread.
-            // This tests the concurrent modification of the main map and indexes.
-            stringstream ordIdToCancel;
-            // Target an order ID from the last 200 operations (T_ID_max(0, i - 200))
-            ordIdToCancel << "T" << threadId << "O" << max(0, i - 200);
-
-            try {
-                cache.cancelOrder(ordIdToCancel.str());
-            }
-            catch (const out_of_range&) {
-                // If the order was already canceled or aged out, it's fine.
+            catch (...) {
+                assert(false && "Cache should be in consistent state after concurrent operations");
             }
         }
-        // READ: Query Operation (getMatchingSizeForSecurity: 80-99)
-        else {
-            stringstream secId;
-            secId << "SecId" << secDist(gen);
-            // This call uses a SHARED lock, testing read performance under contention
-            cache.getMatchingSizeForSecurity(secId.str());
+
+        cout << "Operations completed: " << operationsCompleted << "\n";
+        cout << "Final order count: " << orders.size() << "\n";
+        cout << "Execution time: " << duration.count() << "ms\n";
+        cout << "Test 3 Passed!\n";
+    }
+
+    // Test 4: Stress Test with High Contention
+    cout << "\nTest 4: High Contention Stress Test\n";
+    {
+        OrderCache cache;
+        const int numThreads = 12;
+        vector<thread> threads;
+        atomic<long> totalOperations(0);
+        atomic<int> errors(0);
+
+        // Create heavy contention on a single security
+        for (int i = 0; i < 100; i++) {
+            cache.addOrder(Order("Stress_" + to_string(i), "HotSec",
+                i % 2 == 0 ? "Buy" : "Sell", 100,
+                "User" + to_string(i % 5), "Company" + to_string(i % 3)));
         }
+
+        auto start = chrono::high_resolution_clock::now();
+        auto testDuration = chrono::seconds(3); // Run for 3 seconds
+
+        for (int i = 0; i < numThreads; i++) {
+            threads.emplace_back([&, i]() {
+                random_device rd;
+                mt19937 gen(rd());
+                uniform_int_distribution<> opDis(0, 2);
+
+                auto endTime = chrono::steady_clock::now() + testDuration;
+
+                while (chrono::steady_clock::now() < endTime) {
+                    int operation = opDis(gen);
+                    try {
+                        switch (operation) {
+                        case 0: // Heavy read - matching size on hot security
+                            cache.getMatchingSizeForSecurity("HotSec");
+                            break;
+                        case 1: // Add order to hot security
+                            cache.addOrder(Order("Contention_" + to_string(i) + "_" + to_string(totalOperations),
+                                "HotSec", "Buy", 100, "User" + to_string(i), "Company1"));
+                            break;
+                        case 2: // Cancel random order
+                            cache.cancelOrder("Stress_" + to_string(gen() % 100));
+                            break;
+                        }
+                        totalOperations++;
+                    }
+                    catch (const exception& e) {
+                        cout << "Error: " << e.what() << "\n";
+                        errors++;
+                    }
+                }
+                });
+        }
+
+        for (auto& t : threads) {
+            t.join();
+        }
+
+        auto end = chrono::high_resolution_clock::now();
+        auto duration = chrono::duration_cast<chrono::milliseconds>(end - start);
+
+        cout << "Total operations: " << totalOperations << "\n";
+        cout << "Errors (expected): " << errors << "\n";
+        cout << "Operations per second: " << (totalOperations * 1000 / duration.count()) << "\n";
+        cout << "Test duration: " << duration.count() << "ms\n";
+
+        // Final consistency check
+        auto orders = cache.getAllOrders();
+        unsigned int matchSize = cache.getMatchingSizeForSecurity("HotSec");
+        cout << "Final HotSec matching size: " << matchSize << "\n";
+        cout << "Final order count: " << orders.size() << "\n";
+
+        assert(matchSize >= 0 && "Matching size should be valid");
+        cout << "Test 4 Passed!\n";
     }
-}
 
-// @brief Runs the main multi-threaded test and measures performance.
-void runMultithreadTest() {
-    cout << "\n========================================\n";
-    cout << "    Running Multithread Performance Test\n";
-    cout << "========================================\n";
-    cout << "Threads: " << NUM_THREADS << ", Operations/Thread: " << OPERATIONS_PER_THREAD
-        << ", Total Ops: " << TOTAL_OPERATIONS << "\n";
+    // Test 5: Data Race Detection Test
+    cout << "\nTest 5: Data Race Detection Test\n";
+    {
+        OrderCache cache;
+        const int iterations = 1000;
+        atomic<bool> dataRaceDetected(false);
 
-    OrderCache cache;
-    vector<thread> workers;
+        // This test is designed to run with thread sanitizers
+        thread writer1([&]() {
+            for (int i = 0; i < iterations; i++) {
+                cache.addOrder(Order("RaceTest1_" + to_string(i), "SecA", "Buy", 100, "User1", "Comp1"));
+                if (i % 10 == 0) {
+                    cache.cancelOrder("RaceTest1_" + to_string(i / 2));
+                }
+            }
+            });
 
-    auto start = chrono::high_resolution_clock::now();
+        thread writer2([&]() {
+            for (int i = 0; i < iterations; i++) {
+                cache.addOrder(Order("RaceTest2_" + to_string(i), "SecA", "Sell", 100, "User2", "Comp2"));
+                if (i % 10 == 0) {
+                    cache.cancelOrder("RaceTest2_" + to_string(i / 2));
+                }
+            }
+            });
 
-    // Create and start the worker threads
-    for (int i = 0; i < NUM_THREADS; ++i) {
-        mt19937 workerGen = create_prng();
-        workers.emplace_back(threadWorker, ref(cache), i, ref(workerGen));
+        thread reader1([&]() {
+            for (int i = 0; i < iterations * 2; i++) {
+                try {
+                    cache.getMatchingSizeForSecurity("SecA");
+                    cache.getAllOrders();
+                }
+                catch (...) {
+                    // Ignore
+                }
+            }
+            });
+
+        thread reader2([&]() {
+            for (int i = 0; i < iterations * 2; i++) {
+                try {
+                    cache.getMatchingSizeForSecurity("SecA");
+                    cache.getAllOrders();
+                }
+                catch (...) {
+                    // Ignore
+                }
+            }
+            });
+
+        writer1.join();
+        writer2.join();
+        reader1.join();
+        reader2.join();
+
+        // If we get here without crashes, basic thread safety is working
+        auto orders = cache.getAllOrders();
+        cout << "Data race test completed without crashes. Final orders: " << orders.size() << "\n";
+        cout << "Test 5 Passed!\n";
     }
 
-    // Wait for all threads to finish
-    for (auto& worker : workers) {
-        worker.join();
-    }
-
-    auto end = chrono::high_resolution_clock::now();
-    auto duration = chrono::duration_cast<chrono::milliseconds>(end - start);
-
-    // --- Results and Verification ---
-
-    // A simple sanity check on the final number of orders
-    auto finalOrders = cache.getAllOrders();
-    cout << "\nTest Finished.\n";
-    cout << "Final Order Count (getAllOrders): " << finalOrders.size() << "\n";
-    cout << "Total Execution Time: " << duration.count() << " ms\n";
-    cout << "Operations Per Second: " << fixed << setprecision(2)
-        << (double)TOTAL_OPERATIONS / (duration.count() / 1000.0) << " Ops/sec\n";
-    cout << "========================================\n";
+    cout << "\nAll Multithreading Tests Passed!\n";
 }

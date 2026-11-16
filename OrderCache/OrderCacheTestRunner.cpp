@@ -50,7 +50,7 @@ int main() {
             runOverMatchTest();
             break;
         case 6:
-            runMultithreadTest();
+            runMultithreadingTest();
             break;
         case 40: {
             int numOrders;
